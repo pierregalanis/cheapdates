@@ -1,6 +1,7 @@
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { COLORS, FONTS, RADIUS, SPACING } from '@/constants/theme';
 import { useAuthStore } from '@/store/authStore';
 
@@ -48,7 +49,7 @@ export default function ProfileScreen() {
           <Text style={styles.subtitle}>
             Track check-ins, earn rewards,{'\n'}save your favorite spots, and{'\n'}climb the leaderboard
           </Text>
-          <TouchableOpacity style={styles.signInBtn}>
+          <TouchableOpacity style={styles.signInBtn} onPress={() => router.push('/(auth)/login')}>
             <Text style={styles.signInText}>Sign In / Create Account</Text>
           </TouchableOpacity>
         </View>
