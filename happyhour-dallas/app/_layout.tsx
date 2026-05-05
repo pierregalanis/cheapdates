@@ -1,10 +1,11 @@
 import { useEffect, useRef } from 'react';
-import { Stack } from 'expo-router';
+import { Stack, router } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts, PlayfairDisplay_900Black } from '@expo-google-fonts/playfair-display';
 import { DMSans_400Regular, DMSans_500Medium } from '@expo-google-fonts/dm-sans';
 import { StatusBar } from 'expo-status-bar';
 import * as Notifications from 'expo-notifications';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthStore } from '@/store/authStore';
 import { supabase } from '@/lib/supabase';
 import {
@@ -15,12 +16,17 @@ import {
   clearBadge,
 } from '@/lib/notifications';
 import { initAnalytics, setAnalyticsUser, teardownAnalytics } from '@/lib/analytics';
+import { useLocationStore } from '@/store/locationStore';
+import { useCityStore } from '@/store/cityStore';
+import { ONBOARDING_KEY } from './onboarding';
 import '../global.css';
 
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const { setSession } = useAuthStore();
+  const { init: initLocation, teardown: teardownLocation } = useLocationStore();
+  const hydrateCity = useCityStore((s) => s.hydrate);
   const notifReceivedRef = useRef<Notifications.EventSubscription | null>(null);
   const notifResponseRef = useRef<Notifications.EventSubscription | null>(null);
 
@@ -31,10 +37,20 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
+    hydrateCity();
+
     // Auth state — drives analytics user + push token registration
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       setSession(session);
       initAnalytics(session?.user?.id ?? null);
+
+      // First-run: show onboarding to signed-out users who haven't seen it
+      if (!session) {
+        const seen = await AsyncStorage.getItem(ONBOARDING_KEY);
+        if (!seen) {
+          router.replace('/onboarding' as any);
+        }
+      }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
@@ -46,6 +62,13 @@ export default function RootLayout() {
         const token = await registerForPushNotifications();
         if (token) await savePushToken(session.user.id, token);
         clearBadge();
+        // Restore location sharing preference
+        initLocation(session.user.id);
+      } else {
+        // User signed out — stop sharing
+        const prevSession = await supabase.auth.getSession();
+        const prevId = prevSession.data.session?.user?.id;
+        if (prevId) teardownLocation(prevId);
       }
     });
 
@@ -88,6 +111,13 @@ export default function RootLayout() {
         <Stack.Screen name="notifications" />
         <Stack.Screen name="reservation/[restaurantId]" />
         <Stack.Screen name="review/[restaurantId]" />
+        <Stack.Screen name="leaderboard" />
+        <Stack.Screen name="edit-profile" />
+        <Stack.Screen name="onboarding" options={{ animation: 'fade' }} />
+        <Stack.Screen name="reset-password" />
+        <Stack.Screen name="city-picker" />
+        <Stack.Screen name="chat" />
+        <Stack.Screen name="owner/dashboard" />
         <Stack.Screen name="+not-found" />
       </Stack>
     </>

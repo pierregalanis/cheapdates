@@ -6,8 +6,6 @@ import {
   StyleSheet,
   Animated,
   ScrollView,
-  Dimensions,
-  Platform,
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,11 +15,11 @@ import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
 import * as Location from 'expo-location';
 import * as Haptics from 'expo-haptics';
+import { useRestaurantStore, Restaurant } from '@/store/restaurantStore';
+import { getRestaurantEmoji, getActiveHappyHour, getTopDeals } from '@/lib/happyHourHelpers';
 import { COLORS, FONTS, RADIUS, SPACING } from '@/constants/theme';
 
-const { height: SCREEN_H } = Dimensions.get('window');
-
-// ─── Dallas coordinates ───────────────────────────────────────────────────────
+// ─── Dallas center ────────────────────────────────────────────────────────────
 
 const DALLAS_CENTER: Region = {
   latitude: 32.7950,
@@ -30,7 +28,7 @@ const DALLAS_CENTER: Region = {
   longitudeDelta: 0.055,
 };
 
-// ─── Mock restaurants with coordinates ───────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface MapSpot {
   id: string;
@@ -44,19 +42,27 @@ interface MapSpot {
   minLeft: number;
   deals: string[];
   rating: number;
-  distance: string;
 }
 
-const MAP_SPOTS: MapSpot[] = [
-  { id: '1', name: 'Bottled Blonde',  emoji: '🍸', neighborhood: 'Uptown',          latitude: 32.7961, longitude: -96.8082, crowdLevel: 3, isActive: true,  minLeft: 47,  deals: ['$5 cocktails', '$4 draft'],  rating: 4.6, distance: '0.3 mi' },
-  { id: '2', name: 'Happiest Hour',   emoji: '🍺', neighborhood: 'Uptown',          latitude: 32.7940, longitude: -96.8075, crowdLevel: 4, isActive: true,  minLeft: 77,  deals: ['$3 domestic', '$5 wells'],   rating: 4.8, distance: '0.5 mi' },
-  { id: '3', name: 'Off the Record',  emoji: '🎵', neighborhood: 'Deep Ellum',      latitude: 32.7820, longitude: -96.7820, crowdLevel: 2, isActive: true,  minLeft: 107, deals: ['$6 cocktails', '$4 wine'],   rating: 4.4, distance: '1.2 mi' },
-  { id: '4', name: 'The Rustic',      emoji: '🌿', neighborhood: 'Design District', latitude: 32.8001, longitude: -96.8218, crowdLevel: 2, isActive: true,  minLeft: 47,  deals: ['$5 margaritas', '$8 apps'],  rating: 4.5, distance: '0.8 mi' },
-  { id: '5', name: 'Common Table',    emoji: '🍺', neighborhood: 'Uptown',          latitude: 32.7955, longitude: -96.8060, crowdLevel: 1, isActive: false, minLeft: 0,   deals: ['$1 off drafts'],              rating: 4.3, distance: '0.4 mi' },
-  { id: '6', name: 'Taco y Vino',     emoji: '🌮', neighborhood: 'Oak Cliff',       latitude: 32.7455, longitude: -96.8210, crowdLevel: 2, isActive: true,  minLeft: 47,  deals: ['$3 tacos', '$5 margaritas'], rating: 4.7, distance: '2.1 mi' },
-];
+function toMapSpot(r: Restaurant): MapSpot | null {
+  if (r.latitude == null || r.longitude == null) return null;
+  const activeHH = getActiveHappyHour(r);
+  return {
+    id: r.id,
+    name: r.name,
+    emoji: getRestaurantEmoji(r),
+    neighborhood: r.neighborhood ?? 'Dallas',
+    latitude: r.latitude,
+    longitude: r.longitude,
+    crowdLevel: r.crowd_level,
+    isActive: !!activeHH,
+    minLeft: activeHH?.minLeft ?? 0,
+    deals: getTopDeals(r),
+    rating: r.average_rating,
+  };
+}
 
-const NEIGHBORHOOD_FILTERS = ['All', 'Uptown', 'Deep Ellum', 'Design District', 'Oak Cliff'];
+const NEIGHBORHOOD_FILTERS = ['All', 'Uptown', 'Deep Ellum', 'Design District', 'Oak Cliff', 'Lower Greenville'];
 
 const CROWD_COLOR = {
   0: COLORS.muted,
@@ -122,8 +128,6 @@ function SpotCard({ spot, onClose }: { spot: MapSpot; onClose: () => void }) {
           <View style={styles.cardMetaRow}>
             <Ionicons name="location-outline" size={11} color={COLORS.muted} />
             <Text style={styles.cardMeta}>{spot.neighborhood}</Text>
-            <Text style={styles.cardDot}>·</Text>
-            <Text style={styles.cardMeta}>{spot.distance}</Text>
           </View>
         </View>
         <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
@@ -181,14 +185,22 @@ export default function MapScreen() {
   const mapRef = useRef<MapView>(null);
   const cardAnim = useRef(new Animated.Value(0)).current;
 
+  const { restaurants, fetchRestaurants } = useRestaurantStore();
+
   const [selectedSpot, setSelectedSpot] = useState<MapSpot | null>(null);
   const [activeFilter, setActiveFilter] = useState('All');
   const [locationLoading, setLocationLoading] = useState(false);
   const [mapReady, setMapReady] = useState(false);
 
+  useEffect(() => {
+    if (restaurants.length === 0) fetchRestaurants();
+  }, []);
+
+  const allSpots = restaurants.map(toMapSpot).filter((s): s is MapSpot => s !== null);
+
   const filteredSpots = activeFilter === 'All'
-    ? MAP_SPOTS
-    : MAP_SPOTS.filter((s) => s.neighborhood === activeFilter);
+    ? allSpots
+    : allSpots.filter((s) => s.neighborhood === activeFilter);
 
   const selectSpot = useCallback((spot: MapSpot) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -229,7 +241,7 @@ export default function MapScreen() {
     setActiveFilter(filter);
     deselectSpot();
     if (filter !== 'All') {
-      const inFilter = MAP_SPOTS.filter((s) => s.neighborhood === filter);
+      const inFilter = allSpots.filter((s) => s.neighborhood === filter);
       if (inFilter.length > 0) {
         const avgLat = inFilter.reduce((s, p) => s + p.latitude, 0) / inFilter.length;
         const avgLng = inFilter.reduce((s, p) => s + p.longitude, 0) / inFilter.length;
@@ -298,7 +310,7 @@ export default function MapScreen() {
         >
           {NEIGHBORHOOD_FILTERS.map((f) => {
             const active = activeFilter === f;
-            const count = f === 'All' ? MAP_SPOTS.length : MAP_SPOTS.filter((s) => s.neighborhood === f).length;
+            const count = f === 'All' ? allSpots.length : allSpots.filter((s) => s.neighborhood === f).length;
             return (
               <TouchableOpacity
                 key={f}

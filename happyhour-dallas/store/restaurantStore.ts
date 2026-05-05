@@ -73,19 +73,26 @@ export interface Restaurant {
 
 // ─── Store ────────────────────────────────────────────────────────────────────
 
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 interface RestaurantState {
   restaurants: Restaurant[];
   selectedRestaurant: Restaurant | null;
   searchResults: Restaurant[];
   favorites: string[];
+  favoriteRestaurants: Restaurant[];
   loading: boolean;
   searchLoading: boolean;
+  favoritesLoading: boolean;
   error: string | null;
+  lastFetched: number | null;
 
   fetchRestaurants: (filters?: {
     neighborhood?: string;
     vibe?: string;
     happeningNow?: boolean;
+    city?: string;
+    force?: boolean;
   }) => Promise<void>;
 
   fetchRestaurantById: (id: string) => Promise<void>;
@@ -94,6 +101,7 @@ interface RestaurantState {
 
   toggleFavorite: (restaurantId: string) => Promise<void>;
   fetchFavorites: (userId: string) => Promise<void>;
+  fetchFavoriteRestaurants: (userId: string) => Promise<void>;
 }
 
 export const useRestaurantStore = create<RestaurantState>((set, get) => ({
@@ -101,17 +109,27 @@ export const useRestaurantStore = create<RestaurantState>((set, get) => ({
   selectedRestaurant: null,
   searchResults: [],
   favorites: [],
+  favoriteRestaurants: [],
   loading: false,
   searchLoading: false,
+  favoritesLoading: false,
   error: null,
+  lastFetched: null,
 
   fetchRestaurants: async (filters = {}) => {
+    const { lastFetched, restaurants } = get();
+    const isFiltered = !!(filters.neighborhood || filters.vibe || filters.happeningNow || filters.city);
+    if (!filters.force && !isFiltered && restaurants.length > 0 && lastFetched && Date.now() - lastFetched < CACHE_TTL_MS) {
+      return;
+    }
+
     set({ loading: true, error: null });
     try {
       let query = supabase
         .from('restaurants')
         .select('*, happy_hours(*), menu_items(*)')
         .eq('status', 'approved')
+        .eq('city', filters.city ?? 'Dallas')
         .order('is_verified', { ascending: false })
         .order('average_rating', { ascending: false });
 
@@ -124,7 +142,7 @@ export const useRestaurantStore = create<RestaurantState>((set, get) => ({
 
       const { data, error } = await query;
       if (error) throw error;
-      set({ restaurants: (data as Restaurant[]) ?? [], loading: false });
+      set({ restaurants: (data as Restaurant[]) ?? [], loading: false, lastFetched: Date.now() });
     } catch (err) {
       set({ error: (err as Error).message, loading: false });
     }
@@ -195,5 +213,30 @@ export const useRestaurantStore = create<RestaurantState>((set, get) => ({
       .select('restaurant_id')
       .eq('user_id', userId);
     set({ favorites: (data ?? []).map((f) => f.restaurant_id) });
+  },
+
+  fetchFavoriteRestaurants: async (userId: string) => {
+    set({ favoritesLoading: true });
+    try {
+      const { data: favData } = await supabase
+        .from('favorites')
+        .select('restaurant_id')
+        .eq('user_id', userId);
+      const ids = (favData ?? []).map((f) => f.restaurant_id);
+      set({ favorites: ids });
+      if (!ids.length) {
+        set({ favoriteRestaurants: [], favoritesLoading: false });
+        return;
+      }
+      const { data, error } = await supabase
+        .from('restaurants')
+        .select('*, happy_hours(*), menu_items(*)')
+        .in('id', ids)
+        .eq('status', 'approved');
+      if (error) throw error;
+      set({ favoriteRestaurants: (data as Restaurant[]) ?? [], favoritesLoading: false });
+    } catch {
+      set({ favoritesLoading: false });
+    }
   },
 }));

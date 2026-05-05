@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect } from 'react';
 import {
   View,
   Text,
   FlatList,
   TouchableOpacity,
   StyleSheet,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -13,42 +14,28 @@ import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuthStore } from '@/store/authStore';
+import { useRestaurantStore, type Restaurant } from '@/store/restaurantStore';
+import { getActiveHappyHour, getRestaurantEmoji, getTopDeals } from '@/lib/happyHourHelpers';
 import { COLORS, FONTS, RADIUS, SPACING } from '@/constants/theme';
 
-// ─── Mock saved spots ─────────────────────────────────────────────────────────
-
-interface SavedSpot {
-  id: string;
-  name: string;
-  neighborhood: string;
-  emoji: string;
-  rating: number;
-  deals: string[];
-  happyHourEnd: string;
-  crowdLevel: 0 | 1 | 2 | 3 | 4;
-  isActive: boolean;
-  minLeft: number;
-}
-
-const MOCK_SAVED: SavedSpot[] = [
-  { id: '1', name: 'Bottled Blonde', neighborhood: 'Uptown', emoji: '🍸', rating: 4.6, deals: ['$5 cocktails', '$4 draft beer'], happyHourEnd: '7:00 PM', crowdLevel: 3, isActive: true, minLeft: 47 },
-  { id: '4', name: 'The Rustic', neighborhood: 'Design District', emoji: '🌿', rating: 4.5, deals: ['$5 margaritas', '$8 apps'], happyHourEnd: '7:00 PM', crowdLevel: 2, isActive: true, minLeft: 47 },
-  { id: '6', name: 'Taco y Vino', neighborhood: 'Oak Cliff', emoji: '🌮', rating: 4.7, deals: ['$3 tacos', '$5 margaritas'], happyHourEnd: '7:00 PM', crowdLevel: 2, isActive: false, minLeft: 0 },
-];
-
-const CROWD = {
-  0: { color: COLORS.muted },
-  1: { color: '#34C759' },
-  2: { color: '#FFB347' },
-  3: { color: '#FF6B1A' },
-  4: { color: '#FF3B30' },
-} as const;
+const CROWD_COLOR: Record<number, string> = {
+  0: COLORS.muted,
+  1: '#34C759',
+  2: '#FFB347',
+  3: '#FF6B1A',
+  4: '#FF3B30',
+};
 
 // ─── Saved card ───────────────────────────────────────────────────────────────
 
-function SavedCard({ spot, onUnsave }: { spot: SavedSpot; onUnsave: () => void }) {
-  const crowd = CROWD[spot.crowdLevel];
-  const countdownColor = spot.minLeft <= 30 ? COLORS.status.error : spot.minLeft <= 60 ? COLORS.amber : COLORS.orange;
+function SavedCard({ spot, onUnsave }: { spot: Restaurant; onUnsave: () => void }) {
+  const crowdColor = CROWD_COLOR[spot.crowd_level];
+  const hh = getActiveHappyHour(spot);
+  const isActive = hh !== null;
+  const minLeft = hh?.minLeft ?? 0;
+  const countdownColor = minLeft <= 30 ? COLORS.status.error : minLeft <= 60 ? COLORS.amber : COLORS.orange;
+  const emoji = getRestaurantEmoji(spot);
+  const deals = getTopDeals(spot);
 
   return (
     <TouchableOpacity
@@ -57,17 +44,16 @@ function SavedCard({ spot, onUnsave }: { spot: SavedSpot; onUnsave: () => void }
       onPress={() => router.push({ pathname: '/restaurant/[id]', params: { id: spot.id } } as any)}
     >
       <View style={styles.card}>
-        {/* Left accent */}
-        <View style={[styles.cardAccent, { backgroundColor: crowd.color }]} />
+        <View style={[styles.cardAccent, { backgroundColor: crowdColor }]} />
 
-        <View style={[styles.cardEmojiBg, { backgroundColor: crowd.color + '18' }]}>
-          <Text style={styles.cardEmoji}>{spot.emoji}</Text>
+        <View style={[styles.cardEmojiBg, { backgroundColor: crowdColor + '18' }]}>
+          <Text style={styles.cardEmoji}>{emoji}</Text>
         </View>
 
         <View style={styles.cardContent}>
           <View style={styles.cardRow}>
             <Text style={styles.cardName} numberOfLines={1}>{spot.name}</Text>
-            {spot.isActive ? (
+            {isActive ? (
               <View style={styles.activePill}>
                 <View style={styles.activeDot} />
                 <Text style={styles.activePillText}>Live</Text>
@@ -81,30 +67,36 @@ function SavedCard({ spot, onUnsave }: { spot: SavedSpot; onUnsave: () => void }
 
           <View style={styles.cardMetaRow}>
             <Ionicons name="location-outline" size={11} color={COLORS.muted} />
-            <Text style={styles.cardMeta}>{spot.neighborhood}</Text>
+            <Text style={styles.cardMeta}>{spot.neighborhood ?? 'Dallas'}</Text>
           </View>
 
-          <Text style={styles.cardDeal} numberOfLines={1}>{spot.deals[0]}</Text>
+          <Text style={styles.cardDeal} numberOfLines={1}>
+            {deals[0] ?? 'Happy hour deals available'}
+          </Text>
 
           <View style={styles.cardFooter}>
-            {spot.isActive ? (
+            {isActive && hh ? (
               <View style={styles.timeRow}>
                 <Ionicons name="time-outline" size={11} color={countdownColor} />
                 <Text style={[styles.timeText, { color: countdownColor }]}>
-                  {spot.minLeft}m left · until {spot.happyHourEnd}
+                  {minLeft}m left · until {hh.endTime}
                 </Text>
               </View>
             ) : (
-              <Text style={styles.endedText}>Ends at {spot.happyHourEnd}</Text>
+              <Text style={styles.endedText}>No active happy hour</Text>
             )}
             <View style={styles.starRow}>
               <Ionicons name="star" size={11} color={COLORS.gold} />
-              <Text style={styles.ratingText}>{spot.rating.toFixed(1)}</Text>
+              <Text style={styles.ratingText}>{spot.average_rating.toFixed(1)}</Text>
             </View>
           </View>
         </View>
 
-        <TouchableOpacity style={styles.heartBtn} onPress={onUnsave} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+        <TouchableOpacity
+          style={styles.heartBtn}
+          onPress={onUnsave}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <Ionicons name="heart" size={20} color="#FF375F" />
         </TouchableOpacity>
       </View>
@@ -116,14 +108,19 @@ function SavedCard({ spot, onUnsave }: { spot: SavedSpot; onUnsave: () => void }
 
 export default function SavedScreen() {
   const { user } = useAuthStore();
-  const [spots, setSpots] = useState(MOCK_SAVED);
+  const { favoriteRestaurants, favoritesLoading, toggleFavorite, fetchFavoriteRestaurants } = useRestaurantStore();
 
-  const unsave = (id: string) => {
+  useEffect(() => {
+    if (user) fetchFavoriteRestaurants(user.id);
+  }, [user]);
+
+  const unsave = async (id: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setSpots((prev) => prev.filter((s) => s.id !== id));
+    await toggleFavorite(id);
+    if (user) fetchFavoriteRestaurants(user.id);
   };
 
-  const activeCount = spots.filter((s) => s.isActive).length;
+  const activeCount = favoriteRestaurants.filter((s) => getActiveHappyHour(s) !== null).length;
 
   if (!user) {
     return (
@@ -144,10 +141,28 @@ export default function SavedScreen() {
           <Text style={styles.gateSub}>
             Sign in to bookmark spots, track happy hour times, and get notified before deals end.
           </Text>
-          <TouchableOpacity style={styles.signInBtn} onPress={() => router.push('/(auth)/login' as any)}>
+          <TouchableOpacity
+            style={styles.signInBtn}
+            onPress={() => router.push('/(auth)/login' as any)}
+          >
             <Text style={styles.signInText}>Sign In to Save Spots</Text>
             <Ionicons name="arrow-forward" size={16} color="#fff" />
           </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (favoritesLoading) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <StatusBar style="light" />
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Saved Spots</Text>
+          <Text style={styles.headerSub}>Loading your favorites…</Text>
+        </View>
+        <View style={styles.loadingState}>
+          <ActivityIndicator color={COLORS.orange} />
         </View>
       </SafeAreaView>
     );
@@ -161,7 +176,7 @@ export default function SavedScreen() {
         <View>
           <Text style={styles.headerTitle}>Saved Spots</Text>
           <Text style={styles.headerSub}>
-            {spots.length} saved · {activeCount} happening now
+            {favoriteRestaurants.length} saved · {activeCount} happening now
           </Text>
         </View>
         {activeCount > 0 && (
@@ -173,7 +188,7 @@ export default function SavedScreen() {
       </View>
 
       <FlatList
-        data={spots}
+        data={favoriteRestaurants}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => <SavedCard spot={item} onUnsave={() => unsave(item.id)} />}
         ItemSeparatorComponent={() => <View style={{ height: SPACING.sm }} />}
@@ -185,7 +200,7 @@ export default function SavedScreen() {
             </View>
             <Text style={styles.emptyTitle}>No saved spots</Text>
             <Text style={styles.emptySub}>Tap the heart on any listing to save it here</Text>
-            <TouchableOpacity style={styles.exploreBtn} onPress={() => router.push('/')}>
+            <TouchableOpacity style={styles.exploreBtn} onPress={() => router.push('/' as any)}>
               <Text style={styles.exploreBtnText}>Browse Explore</Text>
             </TouchableOpacity>
           </View>
@@ -225,6 +240,7 @@ const styles = StyleSheet.create({
   activeBadgeText: { fontFamily: FONTS.dmMedium, fontSize: 12, color: COLORS.orange },
 
   list: { paddingTop: SPACING.md, paddingBottom: 48 },
+  loadingState: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
   cardWrapper: {
     marginHorizontal: SPACING.lg,

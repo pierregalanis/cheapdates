@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,8 @@ import { StatusBar } from 'expo-status-bar';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Analytics } from '@/lib/analytics';
+import { supabase } from '@/lib/supabase';
+import { getRestaurantEmoji } from '@/lib/happyHourHelpers';
 import { COLORS, FONTS, RADIUS, SPACING } from '@/constants/theme';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -30,13 +32,6 @@ const TIME_SLOTS = [
 ];
 
 const DAYS = ['Today', 'Tomorrow', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
-const MOCK_RESTAURANTS: Record<string, { name: string; emoji: string; neighborhood: string }> = {
-  '1': { name: 'Bottled Blonde', emoji: '🍸', neighborhood: 'Uptown' },
-  '2': { name: 'Happiest Hour', emoji: '🍺', neighborhood: 'Uptown' },
-  '3': { name: 'Off the Record', emoji: '🎵', neighborhood: 'Deep Ellum' },
-  default: { name: 'The Rustic', emoji: '🌿', neighborhood: 'Design District' },
-};
 
 // ─── Step indicator ───────────────────────────────────────────────────────────
 
@@ -62,7 +57,25 @@ function StepDots({ step }: { step: Step }) {
 
 export default function ReservationScreen() {
   const { restaurantId } = useLocalSearchParams<{ restaurantId: string }>();
-  const restaurant = MOCK_RESTAURANTS[restaurantId] ?? MOCK_RESTAURANTS['default'];
+
+  const [restaurant, setRestaurant] = useState({ name: '', emoji: '🍽️', neighborhood: 'Dallas' });
+
+  useEffect(() => {
+    if (!restaurantId) return;
+    supabase
+      .from('restaurants')
+      .select('name, neighborhood, cuisine_type')
+      .eq('id', restaurantId)
+      .single()
+      .then(({ data }) => {
+        if (!data) return;
+        setRestaurant({
+          name: data.name,
+          neighborhood: data.neighborhood ?? 'Dallas',
+          emoji: getRestaurantEmoji({ cuisine_type: data.cuisine_type }),
+        });
+      });
+  }, [restaurantId]);
 
   const [step, setStep] = useState<Step>(1);
   const [selectedDay, setSelectedDay] = useState(0);
@@ -78,7 +91,6 @@ export default function ReservationScreen() {
   const [notesFocused, setNotesFocused] = useState(false);
 
   const canNext1 = selectedTime !== '';
-  const canNext2 = true;
   const canSubmit = name.trim() !== '' && phone.trim() !== '';
 
   const next = () => {

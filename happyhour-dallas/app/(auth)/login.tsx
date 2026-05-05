@@ -9,6 +9,7 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -18,6 +19,7 @@ import { StatusBar } from 'expo-status-bar';
 import * as Haptics from 'expo-haptics';
 import { useAuthStore } from '@/store/authStore';
 import { COLORS, FONTS, RADIUS, SPACING } from '@/constants/theme';
+import * as AppleAuthentication from 'expo-apple-authentication';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -28,7 +30,21 @@ export default function LoginScreen() {
   const [emailFocused, setEmailFocused] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
 
-  const { signIn } = useAuthStore();
+  const { signIn, signInWithApple } = useAuthStore();
+
+  const handleAppleSignIn = async () => {
+    setLoading(true);
+    setError(null);
+    const { error: appleError, cancelled } = await signInWithApple();
+    setLoading(false);
+    if (cancelled) return;
+    if (appleError) {
+      Alert.alert('Apple Sign-In Failed', appleError.message);
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    router.replace('/(tabs)');
+  };
 
   const handleSignIn = async () => {
     if (!email.trim() || !password) {
@@ -43,7 +59,14 @@ export default function LoginScreen() {
     setLoading(false);
 
     if (signInError) {
-      setError('Invalid email or password. Please try again.');
+      const msg = signInError.message.toLowerCase();
+      setError(
+        msg.includes('email not confirmed')
+          ? 'Please confirm your email first — check your inbox.'
+          : msg.includes('invalid login') || msg.includes('invalid credentials')
+          ? 'Invalid email or password.'
+          : 'Something went wrong. Please try again.'
+      );
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } else {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -75,8 +98,8 @@ export default function LoginScreen() {
             style={styles.logoArea}
           >
             <Text style={styles.logoEmoji}>🍸</Text>
-            <Text style={styles.logoLine1}>HappyHour</Text>
-            <Text style={styles.logoLine2}>Dallas</Text>
+            <Text style={styles.logoLine1}>Cheap</Text>
+            <Text style={styles.logoLine2}>Dates</Text>
           </LinearGradient>
 
           <Text style={styles.tagline}>
@@ -176,15 +199,20 @@ export default function LoginScreen() {
           </View>
 
           {/* Social */}
-          <TouchableOpacity style={styles.socialBtn}>
+          <TouchableOpacity style={styles.socialBtn} disabled>
             <Text style={styles.googleG}>G</Text>
             <Text style={styles.socialText}>Continue with Google</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={[styles.socialBtn, { marginTop: SPACING.sm }]}>
-            <Ionicons name="logo-apple" size={18} color={COLORS.cream} />
-            <Text style={styles.socialText}>Continue with Apple</Text>
-          </TouchableOpacity>
+          {Platform.OS === 'ios' && (
+            <AppleAuthentication.AppleAuthenticationButton
+              buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+              buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+              cornerRadius={999}
+              style={styles.appleBtn}
+              onPress={handleAppleSignIn}
+            />
+          )}
 
           {/* Footer */}
           <View style={styles.footer}>
@@ -344,6 +372,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   socialText: { fontFamily: FONTS.dmMedium, fontSize: 15, color: COLORS.cream },
+  appleBtn: { height: 52, marginTop: SPACING.sm },
 
   footer: {
     flexDirection: 'row',

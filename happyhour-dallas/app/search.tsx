@@ -14,21 +14,10 @@ import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { COLORS, FONTS, RADIUS, SPACING } from '@/constants/theme';
+import { useRestaurantStore, type Restaurant } from '@/store/restaurantStore';
+import { getActiveHappyHour, getRestaurantEmoji, getTopDeals } from '@/lib/happyHourHelpers';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface SearchResult {
-  id: string;
-  name: string;
-  neighborhood: string;
-  emoji: string;
-  rating: number;
-  deals: string[];
-  happyHourEnd: string;
-  isActive: boolean;
-}
-
-// ─── Mock data ────────────────────────────────────────────────────────────────
+// ─── Static data ──────────────────────────────────────────────────────────────
 
 const RECENT_SEARCHES = ['Uptown rooftop', 'Deep Ellum cocktails', '$5 drinks', 'Date night'];
 
@@ -41,45 +30,48 @@ const QUICK_CATEGORIES = [
   { id: 'sports', label: '🏈 Sports Bar', color: '#30B0C7' },
 ];
 
-const MOCK_RESULTS: SearchResult[] = [
-  { id: '1', name: 'Bottled Blonde', neighborhood: 'Uptown', emoji: '🍸', rating: 4.6, deals: ['$5 cocktails', '$4 draft'], happyHourEnd: '7:00 PM', isActive: true },
-  { id: '2', name: 'Happiest Hour', neighborhood: 'Uptown', emoji: '🍺', rating: 4.8, deals: ['$3 domestic', '$5 wells'], happyHourEnd: '7:30 PM', isActive: true },
-  { id: '3', name: 'Off the Record', neighborhood: 'Deep Ellum', emoji: '🎵', rating: 4.4, deals: ['$6 craft cocktails', '$4 wine'], happyHourEnd: '8:00 PM', isActive: true },
-  { id: '4', name: 'The Rustic', neighborhood: 'Design District', emoji: '🌿', rating: 4.5, deals: ['$5 margaritas', '$8 apps'], happyHourEnd: '7:00 PM', isActive: true },
-  { id: '5', name: 'Common Table', neighborhood: 'Uptown', emoji: '🍺', rating: 4.3, deals: ['$1 off drafts', '$6 house wine'], happyHourEnd: '6:30 PM', isActive: false },
-  { id: '6', name: 'Taco y Vino', neighborhood: 'Oak Cliff', emoji: '🌮', rating: 4.7, deals: ['$3 tacos', '$5 margaritas'], happyHourEnd: '7:00 PM', isActive: true },
-];
+// ─── Result row ───────────────────────────────────────────────────────────────
 
-// ─── Components ───────────────────────────────────────────────────────────────
+function ResultRow({ item }: { item: Restaurant }) {
+  const hh = getActiveHappyHour(item);
+  const isActive = hh !== null;
+  const emoji = getRestaurantEmoji(item);
+  const deals = getTopDeals(item);
 
-function ResultRow({ item }: { item: SearchResult }) {
   return (
     <TouchableOpacity
       style={styles.resultRow}
       activeOpacity={0.75}
-      onPress={() => router.push({ pathname: '/restaurant/[id]', params: { id: item.id } })}
+      onPress={() => router.push({ pathname: '/restaurant/[id]', params: { id: item.id } } as any)}
     >
-      <View style={[styles.resultEmojiBg, { backgroundColor: item.isActive ? COLORS.overlay.orange15 : COLORS.overlay.inputBg }]}>
-        <Text style={styles.resultEmoji}>{item.emoji}</Text>
+      <View style={[
+        styles.resultEmojiBg,
+        { backgroundColor: isActive ? COLORS.overlay.orange15 : COLORS.overlay.inputBg },
+      ]}>
+        <Text style={styles.resultEmoji}>{emoji}</Text>
       </View>
 
       <View style={styles.resultContent}>
         <View style={styles.resultTitleRow}>
           <Text style={styles.resultName} numberOfLines={1}>{item.name}</Text>
-          {item.isActive && <View style={styles.activePill}><Text style={styles.activePillText}>Now</Text></View>}
+          {isActive && <View style={styles.activePill}><Text style={styles.activePillText}>Now</Text></View>}
         </View>
         <View style={styles.resultMeta}>
           <Ionicons name="location-outline" size={10} color={COLORS.muted} />
-          <Text style={styles.resultNeighborhood}>{item.neighborhood}</Text>
+          <Text style={styles.resultNeighborhood}>{item.neighborhood ?? 'Dallas'}</Text>
           <Text style={styles.resultDot}>·</Text>
           <Ionicons name="star" size={10} color={COLORS.gold} />
-          <Text style={styles.resultRating}>{item.rating.toFixed(1)}</Text>
+          <Text style={styles.resultRating}>{item.average_rating.toFixed(1)}</Text>
         </View>
-        <Text style={styles.resultDeal} numberOfLines={1}>{item.deals[0]}</Text>
+        {deals[0] ? (
+          <Text style={styles.resultDeal} numberOfLines={1}>{deals[0]}</Text>
+        ) : item.cuisine_type ? (
+          <Text style={styles.resultDeal} numberOfLines={1}>{item.cuisine_type}</Text>
+        ) : null}
       </View>
 
       <View style={styles.resultRight}>
-        <Text style={styles.resultEndTime}>{item.happyHourEnd}</Text>
+        <Text style={styles.resultEndTime}>{hh ? hh.endTime : '—'}</Text>
         <Ionicons name="chevron-forward" size={14} color={COLORS.muted} />
       </View>
     </TouchableOpacity>
@@ -89,9 +81,8 @@ function ResultRow({ item }: { item: SearchResult }) {
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function SearchScreen() {
+  const { searchResults, searchLoading, searchRestaurants, clearSearch } = useRestaurantStore();
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [loading, setLoading] = useState(false);
   const inputRef = useRef<TextInput>(null);
 
   useEffect(() => {
@@ -100,29 +91,20 @@ export default function SearchScreen() {
 
   useEffect(() => {
     if (!query.trim()) {
-      setResults([]);
-      setLoading(false);
+      clearSearch();
       return;
     }
-    setLoading(true);
     const timer = setTimeout(() => {
-      const q = query.toLowerCase();
-      setResults(
-        MOCK_RESULTS.filter(
-          (r) =>
-            r.name.toLowerCase().includes(q) ||
-            r.neighborhood.toLowerCase().includes(q) ||
-            r.deals.some((d) => d.toLowerCase().includes(q))
-        )
-      );
-      setLoading(false);
+      searchRestaurants(query);
     }, 300);
     return () => clearTimeout(timer);
   }, [query]);
 
   const handleCategory = (label: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setQuery(label.replace(/^[^\w]+ ?/, ''));
+    // Strip leading emoji + space from label before searching
+    const stripped = label.replace(/^[\p{Emoji}\s]+/u, '').trim();
+    setQuery(stripped);
   };
 
   const showRecent = !query.trim();
@@ -160,14 +142,14 @@ export default function SearchScreen() {
       </View>
 
       {/* Loading */}
-      {loading && (
+      {searchLoading && (
         <View style={styles.loadingRow}>
           <ActivityIndicator size="small" color={COLORS.orange} />
         </View>
       )}
 
       {/* Recent + categories */}
-      {showRecent && !loading && (
+      {showRecent && !searchLoading && (
         <FlatList
           data={[]}
           renderItem={null}
@@ -205,16 +187,18 @@ export default function SearchScreen() {
       )}
 
       {/* Results */}
-      {showResults && !loading && (
+      {showResults && !searchLoading && (
         <FlatList
-          data={results}
+          data={searchResults}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => <ResultRow item={item} />}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
           contentContainerStyle={styles.resultsList}
           ListHeaderComponent={
-            results.length > 0 ? (
-              <Text style={styles.resultCount}>{results.length} spot{results.length !== 1 ? 's' : ''} found</Text>
+            searchResults.length > 0 ? (
+              <Text style={styles.resultCount}>
+                {searchResults.length} spot{searchResults.length !== 1 ? 's' : ''} found
+              </Text>
             ) : null
           }
           ListEmptyComponent={

@@ -1,117 +1,80 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   FlatList,
   StyleSheet,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
+import { supabase } from '@/lib/supabase';
+import { useAuthStore } from '@/store/authStore';
 import { COLORS, FONTS, RADIUS, SPACING } from '@/constants/theme';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type NotifType = 'deal' | 'checkin' | 'reminder' | 'reward';
+type NotifType = 'deal' | 'checkin' | 'reminder' | 'reward' | string;
 
-interface Notification {
+interface DBNotification {
   id: string;
   type: NotifType;
   title: string;
   body: string;
-  time: string;
-  read: boolean;
-  restaurantId?: string;
+  data: { restaurant_id?: string } | null;
+  is_read: boolean;
+  created_at: string;
 }
 
-// ─── Mock data ────────────────────────────────────────────────────────────────
-
-const MOCK_NOTIFS: Notification[] = [
-  {
-    id: '1',
-    type: 'deal',
-    title: '🔥 Bottled Blonde deal ending soon',
-    body: '$5 cocktails end in 23 minutes — get there!',
-    time: '23m ago',
-    read: false,
-    restaurantId: '1',
-  },
-  {
-    id: '2',
-    type: 'checkin',
-    title: '👯 Your crew is at Happiest Hour',
-    body: '3 friends checked in — happy hour runs until 7:30 PM',
-    time: '41m ago',
-    read: false,
-    restaurantId: '2',
-  },
-  {
-    id: '3',
-    type: 'reward',
-    title: '🏅 You earned a new stamp!',
-    body: 'Deep Ellum Explorer — visit 3 more spots to level up',
-    time: '2h ago',
-    read: true,
-  },
-  {
-    id: '4',
-    type: 'reminder',
-    title: '⏰ Happy hour starts soon',
-    body: 'Off the Record: $6 cocktails start at 4:00 PM',
-    time: '3h ago',
-    read: true,
-    restaurantId: '3',
-  },
-  {
-    id: '5',
-    type: 'deal',
-    title: '🌮 New deal at Taco y Vino',
-    body: '$3 tacos added to happy hour menu',
-    time: 'Yesterday',
-    read: true,
-    restaurantId: '6',
-  },
-  {
-    id: '6',
-    type: 'reward',
-    title: '🎉 You reached Level 2!',
-    body: 'You\'re now a Regular — unlock exclusive deals',
-    time: '2 days ago',
-    read: true,
-  },
-];
-
-const TYPE_CONFIG: Record<NotifType, { icon: keyof typeof Ionicons.glyphMap; color: string; bg: string }> = {
-  deal: { icon: 'pricetag-outline', color: COLORS.orange, bg: 'rgba(255,107,26,0.15)' },
-  checkin: { icon: 'people-outline', color: '#0A84FF', bg: 'rgba(10,132,255,0.15)' },
-  reminder: { icon: 'alarm-outline', color: COLORS.amber, bg: 'rgba(255,179,71,0.15)' },
-  reward: { icon: 'ribbon-outline', color: COLORS.gold, bg: 'rgba(232,168,48,0.15)' },
+const TYPE_CONFIG: Record<string, { icon: keyof typeof Ionicons.glyphMap; color: string; bg: string }> = {
+  deal:     { icon: 'pricetag-outline', color: COLORS.orange,           bg: 'rgba(255,107,26,0.15)' },
+  checkin:  { icon: 'people-outline',   color: '#0A84FF',               bg: 'rgba(10,132,255,0.15)' },
+  reminder: { icon: 'alarm-outline',    color: COLORS.amber,            bg: 'rgba(255,179,71,0.15)' },
+  reward:   { icon: 'ribbon-outline',   color: COLORS.gold,             bg: 'rgba(232,168,48,0.15)' },
+  default:  { icon: 'notifications-outline', color: COLORS.muted,       bg: COLORS.overlay.inputBg  },
 };
 
-// ─── Components ───────────────────────────────────────────────────────────────
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return 'Just now';
+  if (min < 60) return `${min}m ago`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d === 1) return 'Yesterday';
+  if (d < 7) return `${d} days ago`;
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
 
-function NotifRow({ item, onPress }: { item: Notification; onPress: () => void }) {
-  const cfg = TYPE_CONFIG[item.type];
+// ─── Row component ────────────────────────────────────────────────────────────
+
+function NotifRow({ item, onPress }: { item: DBNotification; onPress: () => void }) {
+  const cfg = TYPE_CONFIG[item.type] ?? TYPE_CONFIG.default;
+  const restaurantId = item.data?.restaurant_id;
+
   return (
     <TouchableOpacity
-      style={[styles.row, !item.read && styles.rowUnread]}
+      style={[styles.row, !item.is_read && styles.rowUnread]}
       onPress={onPress}
       activeOpacity={0.75}
     >
-      {!item.read && <View style={styles.unreadDot} />}
+      {!item.is_read && <View style={styles.unreadDot} />}
       <View style={[styles.iconBg, { backgroundColor: cfg.bg }]}>
         <Ionicons name={cfg.icon} size={20} color={cfg.color} />
       </View>
       <View style={styles.rowContent}>
-        <Text style={[styles.rowTitle, !item.read && styles.rowTitleUnread]} numberOfLines={1}>
+        <Text style={[styles.rowTitle, !item.is_read && styles.rowTitleUnread]} numberOfLines={1}>
           {item.title}
         </Text>
         <Text style={styles.rowBody} numberOfLines={2}>{item.body}</Text>
-        <Text style={styles.rowTime}>{item.time}</Text>
+        <Text style={styles.rowTime}>{relativeTime(item.created_at)}</Text>
       </View>
-      {item.restaurantId && (
+      {restaurantId && (
         <Ionicons name="chevron-forward" size={14} color={COLORS.muted} />
       )}
     </TouchableOpacity>
@@ -121,17 +84,53 @@ function NotifRow({ item, onPress }: { item: Notification; onPress: () => void }
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function NotificationsScreen() {
-  const [notifs, setNotifs] = useState(MOCK_NOTIFS);
-  const unreadCount = notifs.filter((n) => !n.read).length;
+  const { user } = useAuthStore();
+  const [notifs, setNotifs] = useState<DBNotification[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const markAllRead = () => setNotifs((prev) => prev.map((n) => ({ ...n, read: true })));
+  const fetchNotifs = useCallback(async () => {
+    if (!user) { setLoading(false); return; }
+    const { data } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    setNotifs((data ?? []) as DBNotification[]);
+    setLoading(false);
+  }, [user]);
 
-  const handlePress = (item: Notification) => {
-    setNotifs((prev) => prev.map((n) => n.id === item.id ? { ...n, read: true } : n));
-    if (item.restaurantId) {
-      router.push({ pathname: '/restaurant/[id]', params: { id: item.restaurantId } });
+  useEffect(() => { fetchNotifs(); }, [fetchNotifs]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchNotifs();
+    setRefreshing(false);
+  }, [fetchNotifs]);
+
+  const markAllRead = async () => {
+    if (!user) return;
+    setNotifs((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    await supabase
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('user_id', user.id)
+      .eq('is_read', false);
+  };
+
+  const handlePress = async (item: DBNotification) => {
+    if (!item.is_read) {
+      setNotifs((prev) => prev.map((n) => n.id === item.id ? { ...n, is_read: true } : n));
+      await supabase.from('notifications').update({ is_read: true }).eq('id', item.id);
+    }
+    const restaurantId = item.data?.restaurant_id;
+    if (restaurantId) {
+      router.push({ pathname: '/restaurant/[id]', params: { id: restaurantId } });
     }
   };
+
+  const unreadCount = notifs.filter((n) => !n.is_read).length;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -158,20 +157,33 @@ export default function NotificationsScreen() {
         </View>
       )}
 
-      <FlatList
-        data={notifs}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <NotifRow item={item} onPress={() => handlePress(item)} />}
-        ItemSeparatorComponent={() => <View style={styles.separator} />}
-        contentContainerStyle={styles.list}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyEmoji}>🔔</Text>
-            <Text style={styles.emptyTitle}>All caught up!</Text>
-            <Text style={styles.emptyBody}>We'll let you know when deals are live near you.</Text>
-          </View>
-        }
-      />
+      {loading ? (
+        <View style={styles.loadingCenter}>
+          <ActivityIndicator color={COLORS.orange} />
+        </View>
+      ) : (
+        <FlatList
+          data={notifs}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => <NotifRow item={item} onPress={() => handlePress(item)} />}
+          ItemSeparatorComponent={() => <View style={styles.separator} />}
+          contentContainerStyle={styles.list}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.orange} />
+          }
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <Text style={styles.emptyEmoji}>🔔</Text>
+              <Text style={styles.emptyTitle}>All caught up!</Text>
+              <Text style={styles.emptyBody}>
+                {user
+                  ? "We'll notify you when deals go live near you."
+                  : "Sign in to receive deal alerts and reminders."}
+              </Text>
+            </View>
+          }
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -180,6 +192,7 @@ export default function NotificationsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.dark },
+  loadingCenter: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
   header: {
     flexDirection: 'row',
@@ -192,14 +205,11 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.border.subtle,
   },
   backBtn: {
-    width: 40,
-    height: 40,
+    width: 40, height: 40,
     borderRadius: RADIUS.md,
     backgroundColor: COLORS.overlay.inputBg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.border.subtle,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: COLORS.border.subtle,
   },
   headerTitle: { fontFamily: FONTS.playfair, fontSize: 22, color: COLORS.cream },
   markRead: { fontFamily: FONTS.dmMedium, fontSize: 13, color: COLORS.orange, width: 80, textAlign: 'right' },
@@ -217,7 +227,7 @@ const styles = StyleSheet.create({
   unreadBannerDot: { width: 7, height: 7, borderRadius: 99, backgroundColor: COLORS.orange },
   unreadBannerText: { fontFamily: FONTS.dmMedium, fontSize: 12, color: COLORS.orange },
 
-  list: { paddingVertical: SPACING.sm },
+  list: { paddingVertical: SPACING.sm, flexGrow: 1 },
   separator: { height: 1, backgroundColor: COLORS.border.subtle, marginLeft: 72 },
 
   row: {
@@ -232,18 +242,15 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 8,
     top: '50%',
-    width: 6,
-    height: 6,
+    width: 6, height: 6,
     borderRadius: 3,
     backgroundColor: COLORS.orange,
     marginTop: -3,
   },
   iconBg: {
-    width: 44,
-    height: 44,
+    width: 44, height: 44,
     borderRadius: RADIUS.md,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: 'center', justifyContent: 'center',
     flexShrink: 0,
   },
   rowContent: { flex: 1 },
@@ -252,7 +259,7 @@ const styles = StyleSheet.create({
   rowBody: { fontFamily: FONTS.dmRegular, fontSize: 13, color: COLORS.muted, lineHeight: 18, marginBottom: 4 },
   rowTime: { fontFamily: FONTS.dmRegular, fontSize: 11, color: COLORS.faded },
 
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80, paddingHorizontal: SPACING.xxxl },
+  empty: { flex: 1, alignItems: 'center', paddingTop: 80, paddingHorizontal: SPACING.xxxl },
   emptyEmoji: { fontSize: 48, marginBottom: SPACING.lg },
   emptyTitle: { fontFamily: FONTS.playfair, fontSize: 24, color: COLORS.cream, marginBottom: SPACING.sm },
   emptyBody: { fontFamily: FONTS.dmRegular, fontSize: 15, color: COLORS.muted, textAlign: 'center', lineHeight: 22 },

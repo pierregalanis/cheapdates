@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
   ScrollView,
   TouchableOpacity,
   StyleSheet,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,83 +14,104 @@ import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuthStore } from '@/store/authStore';
+import { supabase } from '@/lib/supabase';
 import { COLORS, FONTS, RADIUS, SPACING } from '@/constants/theme';
 
-// ─── Data ─────────────────────────────────────────────────────────────────────
+// ─── Static definitions ────────────────────────────────────────────────────────
 
-interface Neighborhood {
-  id: string;
+interface NeighborhoodDef {
+  id: string;   // matches restaurants.neighborhood value
   name: string;
   emoji: string;
-  stampsEarned: number;
   stampsTotal: number;
   color: string;
-  unlocked: boolean;
 }
 
-interface Badge {
+interface BadgeDef {
   id: string;
   name: string;
   emoji: string;
   description: string;
-  earned: boolean;
-  earnedDate?: string;
 }
 
-const NEIGHBORHOODS: Neighborhood[] = [
-  { id: 'uptown',    name: 'Uptown',           emoji: '🏙️', stampsEarned: 3, stampsTotal: 5, color: '#0A84FF', unlocked: true },
-  { id: 'ellum',     name: 'Deep Ellum',        emoji: '🎵', stampsEarned: 2, stampsTotal: 5, color: '#BF5AF2', unlocked: true },
-  { id: 'design',    name: 'Design District',   emoji: '🎨', stampsEarned: 1, stampsTotal: 5, color: '#FF6B1A', unlocked: true },
-  { id: 'oakcliff',  name: 'Oak Cliff',         emoji: '🌮', stampsEarned: 1, stampsTotal: 5, color: '#34C759', unlocked: true },
-  { id: 'lakeview',  name: 'Lake Highlands',    emoji: '🌊', stampsEarned: 0, stampsTotal: 5, color: '#30B0C7', unlocked: false },
-  { id: 'bishop',    name: 'Bishop Arts',       emoji: '🖼️', stampsEarned: 0, stampsTotal: 5, color: '#FF375F', unlocked: false },
-  { id: 'greenville',name: 'Lower Greenville',  emoji: '🌿', stampsEarned: 0, stampsTotal: 5, color: '#32D74B', unlocked: false },
-  { id: 'lakewood',  name: 'Lakewood',          emoji: '🏡', stampsEarned: 0, stampsTotal: 5, color: '#FFD60A', unlocked: false },
+const NEIGHBORHOOD_DEFS: NeighborhoodDef[] = [
+  { id: 'uptown',       name: 'Uptown',          emoji: '🏙️', stampsTotal: 5, color: '#0A84FF' },
+  { id: 'ellum',        name: 'Deep Ellum',       emoji: '🎵', stampsTotal: 5, color: '#BF5AF2' },
+  { id: 'design',       name: 'Design District',  emoji: '🎨', stampsTotal: 5, color: '#FF6B1A' },
+  { id: 'oakcliff',     name: 'Oak Cliff',        emoji: '🌮', stampsTotal: 5, color: '#34C759' },
+  { id: 'lakeview',     name: 'Lake Highlands',   emoji: '🌊', stampsTotal: 5, color: '#30B0C7' },
+  { id: 'bishop',       name: 'Bishop Arts',      emoji: '🖼️', stampsTotal: 5, color: '#FF375F' },
+  { id: 'greenville',   name: 'Lower Greenville', emoji: '🌿', stampsTotal: 5, color: '#32D74B' },
+  { id: 'lakewood',     name: 'Lakewood',         emoji: '🏡', stampsTotal: 5, color: '#FFD60A' },
 ];
 
-const BADGES: Badge[] = [
-  { id: '1', name: 'First Timer',      emoji: '🍸', description: 'Completed your first check-in',        earned: true,  earnedDate: 'Apr 28' },
-  { id: '2', name: 'Uptown Regular',   emoji: '🏙️', description: '3 check-ins in Uptown',                earned: true,  earnedDate: 'May 1' },
-  { id: '3', name: 'Ellum Explorer',   emoji: '🎵', description: '2 check-ins in Deep Ellum',            earned: true,  earnedDate: 'May 2' },
-  { id: '4', name: 'Deal Hunter',      emoji: '💰', description: 'Saved $50+ with happy hour deals',     earned: false },
-  { id: '5', name: 'Social Butterfly', emoji: '🦋', description: 'Check in with 3 different friends',    earned: false },
-  { id: '6', name: 'Neighborhood Pro', emoji: '🗺️', description: 'Unlock all 8 neighborhoods',           earned: false },
+const BADGE_DEFS: BadgeDef[] = [
+  { id: 'first_timer',       name: 'First Timer',      emoji: '🍸', description: 'Completed your first check-in' },
+  { id: 'uptown_regular',    name: 'Uptown Regular',   emoji: '🏙️', description: '3 check-ins in Uptown' },
+  { id: 'ellum_explorer',    name: 'Ellum Explorer',   emoji: '🎵', description: '2 check-ins in Deep Ellum' },
+  { id: 'deal_hunter',       name: 'Deal Hunter',      emoji: '💰', description: 'Saved $50+ with happy hour deals' },
+  { id: 'social_butterfly',  name: 'Social Butterfly', emoji: '🦋', description: 'Check in with 3 different friends' },
+  { id: 'neighborhood_pro',  name: 'Neighborhood Pro', emoji: '🗺️', description: 'Unlock all 8 neighborhoods' },
 ];
 
 const LEVELS = [
-  { name: 'Newcomer',      minPoints: 0,    color: COLORS.muted },
-  { name: 'Regular',       minPoints: 100,  color: '#34C759' },
-  { name: 'Local Legend',  minPoints: 500,  color: COLORS.amber },
-  { name: 'Happy Hour Pro',minPoints: 1000, color: COLORS.orange },
-  { name: 'Dallas Icon',   minPoints: 2500, color: '#FF375F' },
+  { name: 'Newcomer',       minPoints: 0,    color: COLORS.muted },
+  { name: 'Regular',        minPoints: 100,  color: '#34C759' },
+  { name: 'Local Legend',   minPoints: 500,  color: COLORS.amber },
+  { name: 'Happy Hour Pro', minPoints: 1000, color: COLORS.orange },
+  { name: 'Dallas Icon',    minPoints: 2500, color: '#FF375F' },
 ];
 
-const USER_POINTS = 145;
-const USER_LEVEL_IDX = LEVELS.findIndex((l, i) => USER_POINTS >= l.minPoints && (i === LEVELS.length - 1 || USER_POINTS < LEVELS[i + 1].minPoints));
-const CURRENT_LEVEL = LEVELS[USER_LEVEL_IDX];
-const NEXT_LEVEL = LEVELS[USER_LEVEL_IDX + 1];
-const PROGRESS = NEXT_LEVEL
-  ? (USER_POINTS - CURRENT_LEVEL.minPoints) / (NEXT_LEVEL.minPoints - CURRENT_LEVEL.minPoints)
-  : 1;
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// ─── Components ───────────────────────────────────────────────────────────────
+function formatEarnedDate(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
 
-function NeighborhoodStamp({ n }: { n: Neighborhood }) {
+function getLevelMeta(points: number) {
+  const idx = LEVELS.findIndex(
+    (l, i) => points >= l.minPoints && (i === LEVELS.length - 1 || points < LEVELS[i + 1].minPoints)
+  );
+  const current = LEVELS[Math.max(idx, 0)];
+  const next = LEVELS[idx + 1] ?? null;
+  const progress = next
+    ? (points - current.minPoints) / (next.minPoints - current.minPoints)
+    : 1;
+  return { current, next, progress };
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function NeighborhoodStamp({
+  def,
+  stampsEarned,
+  unlocked,
+}: {
+  def: NeighborhoodDef;
+  stampsEarned: number;
+  unlocked: boolean;
+}) {
   return (
-    <View style={[styles.stampCard, !n.unlocked && styles.stampCardLocked]}>
-      <View style={[styles.stampIconBg, { backgroundColor: n.color + '20', borderColor: n.color + '40' }]}>
-        <Text style={styles.stampEmoji}>{n.unlocked ? n.emoji : '🔒'}</Text>
+    <View style={[styles.stampCard, !unlocked && styles.stampCardLocked]}>
+      <View style={[styles.stampIconBg, { backgroundColor: def.color + '20', borderColor: def.color + '40' }]}>
+        <Text style={styles.stampEmoji}>{unlocked ? def.emoji : '🔒'}</Text>
       </View>
-      <Text style={[styles.stampName, !n.unlocked && styles.stampNameLocked]} numberOfLines={1}>
-        {n.name}
+      <Text style={[styles.stampName, !unlocked && styles.stampNameLocked]} numberOfLines={1}>
+        {def.name}
       </Text>
-      {n.unlocked ? (
+      {unlocked ? (
         <>
           <View style={styles.stampProgressBar}>
-            <View style={[styles.stampProgressFill, { width: `${(n.stampsEarned / n.stampsTotal) * 100}%`, backgroundColor: n.color }]} />
+            <View
+              style={[
+                styles.stampProgressFill,
+                { width: `${Math.min((stampsEarned / def.stampsTotal) * 100, 100)}%`, backgroundColor: def.color },
+              ]}
+            />
           </View>
-          <Text style={[styles.stampCount, { color: n.color }]}>
-            {n.stampsEarned}/{n.stampsTotal}
+          <Text style={[styles.stampCount, { color: def.color }]}>
+            {Math.min(stampsEarned, def.stampsTotal)}/{def.stampsTotal}
           </Text>
         </>
       ) : (
@@ -98,16 +121,24 @@ function NeighborhoodStamp({ n }: { n: Neighborhood }) {
   );
 }
 
-function BadgeCard({ badge }: { badge: Badge }) {
+function BadgeCard({
+  def,
+  earned,
+  earnedDate,
+}: {
+  def: BadgeDef;
+  earned: boolean;
+  earnedDate?: string;
+}) {
   return (
-    <View style={[styles.badgeCard, !badge.earned && styles.badgeCardLocked]}>
-      <View style={[styles.badgeEmojiWrap, badge.earned && styles.badgeEmojiWrapEarned]}>
-        <Text style={[styles.badgeEmoji, !badge.earned && { opacity: 0.35 }]}>{badge.emoji}</Text>
+    <View style={[styles.badgeCard, !earned && styles.badgeCardLocked]}>
+      <View style={[styles.badgeEmojiWrap, earned && styles.badgeEmojiWrapEarned]}>
+        <Text style={[styles.badgeEmoji, !earned && { opacity: 0.35 }]}>{def.emoji}</Text>
       </View>
-      <Text style={[styles.badgeName, !badge.earned && styles.badgeNameLocked]}>{badge.name}</Text>
-      <Text style={styles.badgeDesc} numberOfLines={2}>{badge.description}</Text>
-      {badge.earned && badge.earnedDate && (
-        <Text style={styles.badgeDate}>{badge.earnedDate}</Text>
+      <Text style={[styles.badgeName, !earned && styles.badgeNameLocked]}>{def.name}</Text>
+      <Text style={styles.badgeDesc} numberOfLines={2}>{def.description}</Text>
+      {earned && earnedDate && (
+        <Text style={styles.badgeDate}>{earnedDate}</Text>
       )}
     </View>
   );
@@ -116,9 +147,73 @@ function BadgeCard({ badge }: { badge: Badge }) {
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function PassportScreen() {
-  const { user } = useAuthStore();
-  const totalStamps = NEIGHBORHOODS.reduce((s, n) => s + n.stampsEarned, 0);
-  const unlockedCount = NEIGHBORHOODS.filter((n) => n.unlocked).length;
+  const { user, profile, refreshProfile } = useAuthStore();
+
+  const [unlockedSet, setUnlockedSet] = useState<Set<string>>(new Set());
+  const [checkinMap, setCheckinMap] = useState<Record<string, number>>({});
+  const [earnedMap, setEarnedMap] = useState<Record<string, string>>({});  // badge_id → earned_at
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadData = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+
+    const [stampsRes, checkinsRes, badgesRes] = await Promise.all([
+      supabase.from('passport_stamps').select('neighborhood').eq('user_id', user.id),
+      supabase
+        .from('checkins')
+        .select('restaurants(neighborhood)')
+        .eq('user_id', user.id),
+      supabase.from('user_badges').select('badge_type, earned_at').eq('user_id', user.id),
+    ]);
+
+    // Which neighborhoods are unlocked
+    const unlocked = new Set<string>(
+      (stampsRes.data ?? []).map((s: any) => s.neighborhood).filter(Boolean)
+    );
+    setUnlockedSet(unlocked);
+
+    // Count checkins per neighborhood
+    const counts: Record<string, number> = {};
+    (checkinsRes.data ?? []).forEach((c: any) => {
+      const hood = c.restaurants?.neighborhood;
+      if (hood) counts[hood] = (counts[hood] ?? 0) + 1;
+    });
+    setCheckinMap(counts);
+
+    // Which badges are earned (badge_id → earned_at ISO)
+    const earned: Record<string, string> = {};
+    (badgesRes.data ?? []).forEach((b: any) => {
+      if (b.badge_type) earned[b.badge_type] = b.earned_at;
+    });
+    setEarnedMap(earned);
+
+    setLoading(false);
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user) return;
+    refreshProfile();
+    loadData();
+  }, [user?.id]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await Promise.all([refreshProfile(), loadData()]);
+    setRefreshing(false);
+  };
+
+  // ── Derived data ──────────────────────────────────────────────────────────
+
+  const points = profile?.points ?? 0;
+  const { current: currentLevel, next: nextLevel, progress } = getLevelMeta(points);
+
+  const totalCheckins = Object.values(checkinMap).reduce((s, n) => s + n, 0);
+  const unlockedCount = unlockedSet.size;
+  const earnedBadgeCount = Object.keys(earnedMap).length;
+
+  // ── Auth gate ─────────────────────────────────────────────────────────────
 
   if (!user) {
     return (
@@ -137,19 +232,17 @@ export default function PassportScreen() {
           </LinearGradient>
           <Text style={styles.gateTitle}>Your Passport Awaits</Text>
           <Text style={styles.gateSub}>
-            Check in at spots across Uptown, Deep Ellum, Oak Cliff, and 5 more neighborhoods to earn stamps, badges, and climb the leaderboard.
+            Check in at spots across Uptown, Deep Ellum, Oak Cliff, and 5 more neighborhoods
+            to earn stamps, badges, and climb the leaderboard.
           </Text>
-
-          {/* Preview neighborhoods locked */}
           <View style={styles.previewGrid}>
-            {NEIGHBORHOODS.slice(0, 4).map((n) => (
+            {NEIGHBORHOOD_DEFS.slice(0, 4).map((n) => (
               <View key={n.id} style={[styles.previewChip, { borderColor: n.color + '40', backgroundColor: n.color + '12' }]}>
                 <Text style={styles.previewEmoji}>{n.emoji}</Text>
                 <Text style={[styles.previewLabel, { color: n.color }]}>{n.name}</Text>
               </View>
             ))}
           </View>
-
           <TouchableOpacity style={styles.signInBtn} onPress={() => router.push('/(auth)/login' as any)}>
             <Text style={styles.signInText}>Sign In to Start Collecting</Text>
             <Ionicons name="arrow-forward" size={16} color="#fff" />
@@ -159,95 +252,153 @@ export default function PassportScreen() {
     );
   }
 
+  // ── Signed in ─────────────────────────────────────────────────────────────
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar style="light" />
 
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Happy Hour Passport</Text>
-        <Text style={styles.headerSub}>{totalStamps} stamps · {unlockedCount} neighborhoods</Text>
+        <Text style={styles.headerSub}>
+          {loading ? 'Loading…' : `${unlockedCount} neighborhoods · ${totalCheckins} check-ins`}
+        </Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-
-        {/* ── Level card ── */}
-        <LinearGradient
-          colors={['rgba(255,107,26,0.22)', 'rgba(255,107,26,0.08)', 'rgba(26,10,0,0)']}
-          style={styles.levelCard}
+      {loading ? (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color={COLORS.orange} />
+        </View>
+      ) : (
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={COLORS.orange}
+              colors={[COLORS.orange]}
+            />
+          }
         >
-          <View style={styles.levelCardInner}>
-            <View style={styles.levelLeft}>
-              <Text style={styles.levelLabel}>Your Level</Text>
-              <Text style={[styles.levelName, { color: CURRENT_LEVEL.color }]}>{CURRENT_LEVEL.name}</Text>
-              <Text style={styles.levelPoints}>{USER_POINTS} pts</Text>
-            </View>
-            <View style={styles.levelRight}>
-              <Text style={styles.levelNextLabel}>
-                {NEXT_LEVEL ? `${NEXT_LEVEL.minPoints - USER_POINTS} pts to ${NEXT_LEVEL.name}` : 'Max level reached!'}
-              </Text>
-              <View style={styles.levelProgressTrack}>
-                <View style={[styles.levelProgressFill, { width: `${Math.min(PROGRESS * 100, 100)}%`, backgroundColor: CURRENT_LEVEL.color }]} />
+
+          {/* ── Level card ── */}
+          <LinearGradient
+            colors={['rgba(255,107,26,0.22)', 'rgba(255,107,26,0.08)', 'rgba(26,10,0,0)']}
+            style={styles.levelCard}
+          >
+            <View style={styles.levelCardInner}>
+              <View style={styles.levelLeft}>
+                <Text style={styles.levelLabel}>Your Level</Text>
+                <Text style={[styles.levelName, { color: currentLevel.color }]}>{currentLevel.name}</Text>
+                <Text style={styles.levelPoints}>{points} pts</Text>
+              </View>
+              <View style={styles.levelRight}>
+                <Text style={styles.levelNextLabel}>
+                  {nextLevel
+                    ? `${nextLevel.minPoints - points} pts to ${nextLevel.name}`
+                    : 'Max level reached!'}
+                </Text>
+                <View style={styles.levelProgressTrack}>
+                  <View
+                    style={[
+                      styles.levelProgressFill,
+                      { width: `${Math.min(progress * 100, 100)}%`, backgroundColor: currentLevel.color },
+                    ]}
+                  />
+                </View>
               </View>
             </View>
+
+            <View style={styles.statsRow}>
+              {[
+                { value: unlockedSet.size.toString(), label: 'Stamps' },
+                { value: earnedBadgeCount.toString(),  label: 'Badges' },
+                { value: unlockedCount.toString(),     label: 'Neighborhoods' },
+                { value: totalCheckins.toString(),     label: 'Check-ins' },
+              ].map((stat) => (
+                <View key={stat.label} style={styles.statBox}>
+                  <Text style={styles.statValue}>{stat.value}</Text>
+                  <Text style={styles.statLabel}>{stat.label}</Text>
+                </View>
+              ))}
+            </View>
+          </LinearGradient>
+
+          {/* ── Neighborhood stamps ── */}
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Neighborhoods</Text>
+            <Text style={styles.sectionSub}>{unlockedCount} of {NEIGHBORHOOD_DEFS.length} unlocked</Text>
           </View>
 
-          <View style={styles.statsRow}>
+          <View style={styles.stampGrid}>
+            {NEIGHBORHOOD_DEFS.map((def) => (
+              <NeighborhoodStamp
+                key={def.id}
+                def={def}
+                stampsEarned={checkinMap[def.id] ?? 0}
+                unlocked={unlockedSet.has(def.id)}
+              />
+            ))}
+          </View>
+
+          {/* ── Badges ── */}
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Badges</Text>
+            <Text style={styles.sectionSub}>{earnedBadgeCount} earned</Text>
+          </View>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.badgesRow}
+          >
+            {BADGE_DEFS.map((def) => (
+              <BadgeCard
+                key={def.id}
+                def={def}
+                earned={!!earnedMap[def.id]}
+                earnedDate={earnedMap[def.id] ? formatEarnedDate(earnedMap[def.id]) : undefined}
+              />
+            ))}
+          </ScrollView>
+
+          {/* ── Leaderboard link ── */}
+          <TouchableOpacity
+            style={styles.leaderboardRow}
+            onPress={() => router.push('/leaderboard' as any)}
+            activeOpacity={0.8}
+          >
+            <View style={styles.leaderboardIconBg}>
+              <Ionicons name="trophy-outline" size={18} color={COLORS.gold} />
+            </View>
+            <View style={styles.leaderboardLabel}>
+              <Text style={styles.leaderboardTitle}>Dallas Leaderboard</Text>
+              <Text style={styles.leaderboardSub}>See how you rank against the city</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={COLORS.muted} />
+          </TouchableOpacity>
+
+          {/* ── How to earn stamps ── */}
+          <View style={styles.howToCard}>
+            <Text style={styles.howToTitle}>How to earn stamps</Text>
             {[
-              { value: totalStamps.toString(), label: 'Stamps' },
-              { value: BADGES.filter((b) => b.earned).length.toString(), label: 'Badges' },
-              { value: unlockedCount.toString(), label: 'Neighborhoods' },
-              { value: '7', label: 'Check-ins' },
-            ].map((stat) => (
-              <View key={stat.label} style={styles.statBox}>
-                <Text style={styles.statValue}>{stat.value}</Text>
-                <Text style={styles.statLabel}>{stat.label}</Text>
+              { icon: 'location' as const,  text: 'Check in during happy hour at any verified spot' },
+              { icon: 'star' as const,      text: 'Leave a review for bonus points' },
+              { icon: 'people' as const,    text: 'Bring friends — social check-ins earn 2× stamps' },
+            ].map((item) => (
+              <View key={item.text} style={styles.howToRow}>
+                <View style={styles.howToIconBg}>
+                  <Ionicons name={item.icon} size={15} color={COLORS.orange} />
+                </View>
+                <Text style={styles.howToText}>{item.text}</Text>
               </View>
             ))}
           </View>
-        </LinearGradient>
 
-        {/* ── Neighborhood stamps ── */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Neighborhoods</Text>
-          <Text style={styles.sectionSub}>{unlockedCount} of 8 unlocked</Text>
-        </View>
-
-        <View style={styles.stampGrid}>
-          {NEIGHBORHOODS.map((n) => <NeighborhoodStamp key={n.id} n={n} />)}
-        </View>
-
-        {/* ── Badges ── */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Badges</Text>
-          <Text style={styles.sectionSub}>{BADGES.filter((b) => b.earned).length} earned</Text>
-        </View>
-
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.badgesRow}
-        >
-          {BADGES.map((b) => <BadgeCard key={b.id} badge={b} />)}
         </ScrollView>
-
-        {/* ── How to earn stamps ── */}
-        <View style={styles.howToCard}>
-          <Text style={styles.howToTitle}>How to earn stamps</Text>
-          {[
-            { icon: 'location' as const, text: 'Check in during happy hour at any verified spot' },
-            { icon: 'star' as const, text: 'Leave a review for bonus points' },
-            { icon: 'people' as const, text: 'Bring friends — social check-ins earn 2× stamps' },
-          ].map((item) => (
-            <View key={item.text} style={styles.howToRow}>
-              <View style={styles.howToIconBg}>
-                <Ionicons name={item.icon} size={15} color={COLORS.orange} />
-              </View>
-              <Text style={styles.howToText}>{item.text}</Text>
-            </View>
-          ))}
-        </View>
-
-      </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
@@ -267,6 +418,7 @@ const styles = StyleSheet.create({
   headerTitle: { fontFamily: FONTS.playfair, fontSize: 24, color: COLORS.cream },
   headerSub: { fontFamily: FONTS.dmRegular, fontSize: 13, color: COLORS.muted, marginTop: 3 },
 
+  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scrollContent: { paddingBottom: 48 },
 
   // Level card
@@ -277,9 +429,19 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border.default,
     overflow: 'hidden',
   },
-  levelCardInner: { flexDirection: 'row', alignItems: 'flex-start', padding: SPACING.lg, paddingBottom: SPACING.md, gap: SPACING.xl },
+  levelCardInner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: SPACING.lg,
+    paddingBottom: SPACING.md,
+    gap: SPACING.xl,
+  },
   levelLeft: {},
-  levelLabel: { fontFamily: FONTS.dmMedium, fontSize: 11, color: COLORS.muted, letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 4 },
+  levelLabel: {
+    fontFamily: FONTS.dmMedium, fontSize: 11,
+    color: COLORS.muted, letterSpacing: 0.6,
+    textTransform: 'uppercase', marginBottom: 4,
+  },
   levelName: { fontFamily: FONTS.playfair, fontSize: 22, marginBottom: 2 },
   levelPoints: { fontFamily: FONTS.dmRegular, fontSize: 13, color: COLORS.muted },
   levelRight: { flex: 1, paddingTop: 20 },
@@ -304,7 +466,11 @@ const styles = StyleSheet.create({
   sectionSub: { fontFamily: FONTS.dmRegular, fontSize: 13, color: COLORS.muted },
 
   // Stamp grid
-  stampGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: SPACING.md, gap: SPACING.sm, marginBottom: SPACING.lg },
+  stampGrid: {
+    flexDirection: 'row', flexWrap: 'wrap',
+    paddingHorizontal: SPACING.md, gap: SPACING.sm,
+    marginBottom: SPACING.lg,
+  },
   stampCard: {
     width: '47%',
     backgroundColor: COLORS.card,
@@ -322,13 +488,20 @@ const styles = StyleSheet.create({
   stampEmoji: { fontSize: 26 },
   stampName: { fontFamily: FONTS.dmMedium, fontSize: 13, color: COLORS.cream, marginBottom: 6, textAlign: 'center' },
   stampNameLocked: { color: COLORS.muted },
-  stampProgressBar: { width: '100%', height: 4, backgroundColor: COLORS.overlay.inputBg, borderRadius: 2, overflow: 'hidden', marginBottom: 4 },
+  stampProgressBar: {
+    width: '100%', height: 4,
+    backgroundColor: COLORS.overlay.inputBg,
+    borderRadius: 2, overflow: 'hidden', marginBottom: 4,
+  },
   stampProgressFill: { height: '100%', borderRadius: 2 },
   stampCount: { fontFamily: FONTS.dmMedium, fontSize: 11 },
   stampLockLabel: { fontFamily: FONTS.dmRegular, fontSize: 11, color: COLORS.muted },
 
   // Badges
-  badgesRow: { paddingHorizontal: SPACING.lg, gap: SPACING.sm, paddingBottom: SPACING.sm, marginBottom: SPACING.lg },
+  badgesRow: {
+    paddingHorizontal: SPACING.lg, gap: SPACING.sm,
+    paddingBottom: SPACING.sm, marginBottom: SPACING.lg,
+  },
   badgeCard: {
     width: 130,
     backgroundColor: COLORS.card,
@@ -358,6 +531,29 @@ const styles = StyleSheet.create({
   badgeDesc: { fontFamily: FONTS.dmRegular, fontSize: 10, color: COLORS.muted, textAlign: 'center', lineHeight: 14 },
   badgeDate: { fontFamily: FONTS.dmMedium, fontSize: 10, color: COLORS.gold, marginTop: 4 },
 
+  // Leaderboard row
+  leaderboardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.md,
+    marginHorizontal: SPACING.lg,
+    marginBottom: SPACING.lg,
+    backgroundColor: COLORS.card,
+    borderRadius: RADIUS.xl,
+    padding: SPACING.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(232,168,48,0.25)',
+  },
+  leaderboardIconBg: {
+    width: 40, height: 40, borderRadius: RADIUS.md,
+    backgroundColor: 'rgba(232,168,48,0.12)',
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: 'rgba(232,168,48,0.25)',
+  },
+  leaderboardLabel: { flex: 1 },
+  leaderboardTitle: { fontFamily: FONTS.dmMedium, fontSize: 15, color: COLORS.cream },
+  leaderboardSub: { fontFamily: FONTS.dmRegular, fontSize: 12, color: COLORS.muted, marginTop: 2 },
+
   // How-to card
   howToCard: {
     marginHorizontal: SPACING.lg,
@@ -369,17 +565,29 @@ const styles = StyleSheet.create({
   },
   howToTitle: { fontFamily: FONTS.playfair, fontSize: 18, color: COLORS.cream, marginBottom: SPACING.md },
   howToRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.md, marginBottom: SPACING.md },
-  howToIconBg: { width: 32, height: 32, borderRadius: RADIUS.sm, backgroundColor: COLORS.overlay.orange15, alignItems: 'center', justifyContent: 'center' },
+  howToIconBg: {
+    width: 32, height: 32, borderRadius: RADIUS.sm,
+    backgroundColor: COLORS.overlay.orange15,
+    alignItems: 'center', justifyContent: 'center',
+  },
   howToText: { fontFamily: FONTS.dmRegular, fontSize: 13, color: COLORS.muted, flex: 1, lineHeight: 18 },
 
   // Auth gate
   gateContent: { alignItems: 'center', padding: SPACING.xl, paddingBottom: 60 },
-  gateIconArea: { width: 120, height: 120, borderRadius: 60, alignItems: 'center', justifyContent: 'center', marginBottom: SPACING.xl, marginTop: SPACING.xl },
+  gateIconArea: {
+    width: 120, height: 120, borderRadius: 60,
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: SPACING.xl, marginTop: SPACING.xl,
+  },
   gateEmoji: { fontSize: 56 },
   gateTitle: { fontFamily: FONTS.playfair, fontSize: 26, color: COLORS.cream, marginBottom: SPACING.sm, textAlign: 'center' },
   gateSub: { fontFamily: FONTS.dmRegular, fontSize: 15, color: COLORS.muted, textAlign: 'center', lineHeight: 22, marginBottom: SPACING.xl },
   previewGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm, marginBottom: SPACING.xl, justifyContent: 'center' },
-  previewChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: RADIUS.full, borderWidth: 1 },
+  previewChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 12, paddingVertical: 8,
+    borderRadius: RADIUS.full, borderWidth: 1,
+  },
   previewEmoji: { fontSize: 16 },
   previewLabel: { fontFamily: FONTS.dmMedium, fontSize: 13 },
   signInBtn: {

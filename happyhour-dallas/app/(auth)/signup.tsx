@@ -9,7 +9,10 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
+  Linking,
+  Alert,
 } from 'react-native';
+import { LINKS } from '@/constants/links';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,6 +20,7 @@ import { StatusBar } from 'expo-status-bar';
 import * as Haptics from 'expo-haptics';
 import { useAuthStore } from '@/store/authStore';
 import { COLORS, FONTS, RADIUS, SPACING } from '@/constants/theme';
+import * as AppleAuthentication from 'expo-apple-authentication';
 
 export default function SignupScreen() {
   const [fullName, setFullName] = useState('');
@@ -31,7 +35,21 @@ export default function SignupScreen() {
   const [emailFocused, setEmailFocused]   = useState(false);
   const [passFocused, setPassFocused]     = useState(false);
 
-  const { signUp } = useAuthStore();
+  const { signUp, signInWithApple } = useAuthStore();
+
+  const handleAppleSignIn = async () => {
+    setLoading(true);
+    setError(null);
+    const { error: appleError, cancelled } = await signInWithApple();
+    setLoading(false);
+    if (cancelled) return;
+    if (appleError) {
+      Alert.alert('Apple Sign-In Failed', appleError.message);
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    router.replace('/(tabs)');
+  };
 
   const handleSignUp = async () => {
     if (!fullName.trim() || !email.trim() || !password) {
@@ -46,7 +64,7 @@ export default function SignupScreen() {
     setError(null);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-    const { error: signUpError } = await signUp(
+    const { error: signUpError, session } = await signUp(
       email.trim().toLowerCase(),
       password,
       fullName.trim()
@@ -54,13 +72,21 @@ export default function SignupScreen() {
     setLoading(false);
 
     if (signUpError) {
+      const msg = signUpError.message.toLowerCase();
       setError(
-        signUpError.message.includes('already registered')
+        msg.includes('already registered') || msg.includes('already been registered')
           ? 'An account with this email already exists.'
+          : msg.includes('weak password') || msg.includes('password')
+          ? 'Password is too weak. Try a longer one.'
           : 'Something went wrong. Please try again.'
       );
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } else if (session) {
+      // Email confirmation is disabled — user is already signed in
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      router.replace('/(tabs)');
     } else {
+      // Email confirmation is enabled — ask them to check email
       setSuccess(true);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
@@ -206,11 +232,28 @@ export default function SignupScreen() {
             )}
           </TouchableOpacity>
 
+          {Platform.OS === 'ios' && (
+            <>
+              <View style={styles.divider}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>or</Text>
+                <View style={styles.dividerLine} />
+              </View>
+              <AppleAuthentication.AppleAuthenticationButton
+                buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_UP}
+                buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                cornerRadius={999}
+                style={styles.appleBtn}
+                onPress={handleAppleSignIn}
+              />
+            </>
+          )}
+
           <Text style={styles.termsText}>
             By creating an account you agree to our{' '}
-            <Text style={styles.termsLink}>Terms of Service</Text>
+            <Text style={styles.termsLink} onPress={() => Linking.openURL(LINKS.terms)}>Terms of Service</Text>
             {' '}and{' '}
-            <Text style={styles.termsLink}>Privacy Policy</Text>
+            <Text style={styles.termsLink} onPress={() => Linking.openURL(LINKS.privacy)}>Privacy Policy</Text>
           </Text>
 
           <View style={styles.footer}>
@@ -336,6 +379,16 @@ const styles = StyleSheet.create({
   },
   footerText: { fontFamily: FONTS.dmRegular, fontSize: 14, color: COLORS.muted },
   footerLink: { fontFamily: FONTS.dmMedium, fontSize: 14, color: COLORS.orange },
+
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.md,
+    marginVertical: SPACING.lg,
+  },
+  dividerLine: { flex: 1, height: 1, backgroundColor: COLORS.border.subtle },
+  dividerText: { fontFamily: FONTS.dmRegular, fontSize: 12, color: COLORS.muted },
+  appleBtn: { height: 52 },
 
   // Success state
   successContainer: {
