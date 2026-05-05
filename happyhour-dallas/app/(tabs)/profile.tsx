@@ -9,23 +9,23 @@ import { useAuthStore } from '@/store/authStore';
 import { useLocationStore } from '@/store/locationStore';
 import { supabase } from '@/lib/supabase';
 import { LINKS } from '@/constants/links';
+import { BADGE_META } from '@/lib/checkin';
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const ALL_NEIGHBORHOODS = [
+  'Deep Ellum', 'Uptown', 'Oak Cliff', 'Bishop Arts',
+  'Lower Greenville', 'Knox-Henderson', 'Design District', 'Lakewood',
+  'Addison', 'Frisco', 'Plano', 'Richardson', 'Irving', 'Garland',
+];
 
 // ─── Settings row ─────────────────────────────────────────────────────────────
 
 function SettingsRow({
-  icon,
-  label,
-  sub,
-  right,
-  onPress,
-  danger,
+  icon, label, sub, right, onPress, danger,
 }: {
-  icon: string;
-  label: string;
-  sub?: string;
-  right?: React.ReactNode;
-  onPress?: () => void;
-  danger?: boolean;
+  icon: string; label: string; sub?: string;
+  right?: React.ReactNode; onPress?: () => void; danger?: boolean;
 }) {
   return (
     <TouchableOpacity
@@ -51,35 +51,31 @@ function SettingsRow({
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function ProfileScreen() {
-  const { user, profile, refreshProfile, ownedRestaurant } = useAuthStore();
-  const { signOut } = useAuthStore();
+  const { user, profile, refreshProfile, ownedRestaurant, signOut } = useAuthStore();
   const { isSharing, permissionGranted, loading: locationLoading, toggle } = useLocationStore();
+
   const [stats, setStats] = useState({ checkins: 0, reviews: 0, stamps: 0 });
+  const [badges, setBadges] = useState<Array<{ badge_type: string; badge_name: string }>>([]);
+  const [earnedNeighborhoods, setEarnedNeighborhoods] = useState<string[]>([]);
 
   useEffect(() => {
     if (!user) return;
     refreshProfile();
-    // Fetch counts in parallel
     Promise.all([
       supabase.from('checkins').select('id', { count: 'exact', head: true }).eq('user_id', user.id),
       supabase.from('reviews').select('id', { count: 'exact', head: true }).eq('user_id', user.id),
       supabase.from('passport_stamps').select('id', { count: 'exact', head: true }).eq('user_id', user.id),
-    ]).then(([c, r, s]) => {
+      supabase.from('user_badges').select('badge_type, badge_name').eq('user_id', user.id),
+      supabase.from('passport_stamps').select('neighborhood').eq('user_id', user.id),
+    ]).then(([c, r, s, b, stamps]) => {
       setStats({ checkins: c.count ?? 0, reviews: r.count ?? 0, stamps: s.count ?? 0 });
+      setBadges((b.data as any[]) ?? []);
+      setEarnedNeighborhoods((stamps.data ?? []).map((s: any) => s.neighborhood));
     });
   }, [user?.id]);
 
-  const handleSignOut = async () => {
-    if (user) {
-      // locationStore teardown is handled in authStore.signOut watcher in _layout
-    }
-    await signOut();
-  };
-
-  const handleLocationToggle = () => {
-    if (!user) return;
-    toggle(user.id);
-  };
+  const handleSignOut = async () => { await signOut(); };
+  const handleLocationToggle = () => { if (user) toggle(user.id); };
 
   // ── Signed out ──
   if (!user) {
@@ -122,18 +118,17 @@ export default function ProfileScreen() {
           <View style={styles.avatarRing}>
             <Ionicons name="person" size={48} color={COLORS.orange} />
           </View>
-          <Text style={styles.email}>
-            {profile?.full_name ?? user.email}
-          </Text>
+          <Text style={styles.displayName}>{profile?.full_name ?? user.email}</Text>
           {profile?.full_name && (
             <Text style={styles.emailSub}>{user.email}</Text>
           )}
-          <View style={styles.levelPill}>
+          <TouchableOpacity style={styles.levelPill} onPress={() => router.push('/leaderboard' as any)}>
             <Ionicons name="ribbon-outline" size={12} color={COLORS.gold} />
             <Text style={styles.levelText}>
               {profile?.level ?? 'Newcomer'} · {profile?.points ?? 0} pts
             </Text>
-          </View>
+            <Ionicons name="chevron-forward" size={11} color={COLORS.gold} />
+          </TouchableOpacity>
         </View>
 
         {/* ── Stats ── */}
@@ -150,12 +145,78 @@ export default function ProfileScreen() {
           ))}
         </View>
 
-        {/* ── Location sharing card ── */}
+        {/* ── Badges ── */}
+        <View style={styles.section}>
+          <View style={styles.sectionTitleRow}>
+            <Text style={styles.sectionTitle}>Badges</Text>
+            <Text style={styles.sectionCount}>{badges.length} earned</Text>
+          </View>
+
+          {badges.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyCardText}>Check in to earn your first badge</Text>
+            </View>
+          ) : (
+            <View style={styles.badgeGrid}>
+              {badges.map((badge) => {
+                const meta = BADGE_META[badge.badge_type] ?? { emoji: '🏅', color: COLORS.orange, description: '' };
+                return (
+                  <View key={badge.badge_type} style={[styles.badgeChip, { borderColor: meta.color + '40', backgroundColor: meta.color + '12' }]}>
+                    <Text style={styles.badgeEmoji}>{meta.emoji}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.badgeName, { color: meta.color }]}>{badge.badge_name}</Text>
+                      {meta.description ? (
+                        <Text style={styles.badgeDesc}>{meta.description}</Text>
+                      ) : null}
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </View>
+
+        {/* ── Passport ── */}
+        <View style={styles.section}>
+          <View style={styles.sectionTitleRow}>
+            <Text style={styles.sectionTitle}>Dallas Passport</Text>
+            <Text style={styles.sectionCount}>{earnedNeighborhoods.length}/{ALL_NEIGHBORHOODS.length}</Text>
+          </View>
+          <View style={styles.passportGrid}>
+            {ALL_NEIGHBORHOODS.map((hood) => {
+              const earned = earnedNeighborhoods.includes(hood);
+              return (
+                <View
+                  key={hood}
+                  style={[
+                    styles.passportStamp,
+                    earned ? styles.passportStampEarned : styles.passportStampEmpty,
+                  ]}
+                >
+                  <Text style={[styles.passportStampIcon, !earned && { opacity: 0.25 }]}>
+                    {earned ? '🗺️' : '○'}
+                  </Text>
+                  <Text
+                    style={[styles.passportStampName, earned ? styles.passportStampNameEarned : styles.passportStampNameEmpty]}
+                    numberOfLines={2}
+                  >
+                    {hood}
+                  </Text>
+                  {earned && (
+                    <View style={styles.passportStampCheck}>
+                      <Ionicons name="checkmark" size={9} color={COLORS.orange} />
+                    </View>
+                  )}
+                </View>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* ── Location sharing ── */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Privacy</Text>
-
           <View style={styles.locationCard}>
-            {/* Active indicator bar */}
             {isSharing && (
               <LinearGradient
                 colors={['rgba(52,199,89,0.18)', 'transparent']}
@@ -165,7 +226,6 @@ export default function ProfileScreen() {
                 <Text style={styles.locationActiveText}>Sharing your location with nearby restaurants</Text>
               </LinearGradient>
             )}
-
             <View style={styles.locationToggleRow}>
               <View style={styles.locationIconBg}>
                 <Ionicons
@@ -177,9 +237,7 @@ export default function ProfileScreen() {
               <View style={styles.locationLabelWrap}>
                 <Text style={styles.locationLabel}>Share my location</Text>
                 <Text style={styles.locationSub}>
-                  {isSharing
-                    ? 'Active · foreground only'
-                    : 'Off · restaurants can\'t see you'}
+                  {isSharing ? 'Active · foreground only' : "Off · restaurants can't see you"}
                 </Text>
               </View>
               {locationLoading ? (
@@ -194,7 +252,6 @@ export default function ProfileScreen() {
                 />
               )}
             </View>
-
             {!permissionGranted && !isSharing && (
               <View style={styles.permissionNote}>
                 <Ionicons name="information-circle-outline" size={13} color={COLORS.amber} />
@@ -203,7 +260,6 @@ export default function ProfileScreen() {
                 </Text>
               </View>
             )}
-
             <View style={styles.locationPrivacyNote}>
               <Ionicons name="shield-checkmark-outline" size={13} color={COLORS.muted} />
               <Text style={styles.locationPrivacyText}>
@@ -217,10 +273,7 @@ export default function ProfileScreen() {
         {ownedRestaurant && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Your Restaurant</Text>
-            <TouchableOpacity
-              activeOpacity={0.82}
-              onPress={() => router.push('/owner/dashboard' as any)}
-            >
+            <TouchableOpacity activeOpacity={0.82} onPress={() => router.push('/owner/dashboard' as any)}>
               <LinearGradient
                 colors={['rgba(255,107,26,0.18)', 'rgba(255,107,26,0.06)']}
                 style={styles.ownerCard}
@@ -245,10 +298,17 @@ export default function ProfileScreen() {
           </View>
         )}
 
-        {/* ── Settings ── */}
+        {/* ── Account settings ── */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account</Text>
           <View style={styles.settingsCard}>
+            <SettingsRow
+              icon="trophy-outline"
+              label="Leaderboard"
+              sub="See where you rank in Dallas"
+              onPress={() => router.push('/leaderboard' as any)}
+            />
+            <View style={styles.rowSep} />
             <SettingsRow
               icon="notifications-outline"
               label="Notifications"
@@ -306,11 +366,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.dark },
 
   header: {
-    paddingHorizontal: SPACING.lg,
-    paddingTop: SPACING.md,
-    paddingBottom: SPACING.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border.subtle,
+    paddingHorizontal: SPACING.lg, paddingTop: SPACING.md, paddingBottom: SPACING.lg,
+    borderBottomWidth: 1, borderBottomColor: COLORS.border.subtle,
   },
   headerTitle: { fontFamily: FONTS.playfair, fontSize: 24, color: COLORS.cream },
 
@@ -328,7 +385,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.18, shadowRadius: 12, elevation: 5,
   },
-  email: { fontFamily: FONTS.dmMedium, fontSize: 16, color: COLORS.cream, marginBottom: 2 },
+  displayName: { fontFamily: FONTS.dmMedium, fontSize: 16, color: COLORS.cream, marginBottom: 2 },
   emailSub: { fontFamily: FONTS.dmRegular, fontSize: 13, color: COLORS.muted, marginBottom: SPACING.sm },
   levelPill: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
@@ -341,10 +398,8 @@ const styles = StyleSheet.create({
 
   // Stats
   statsRow: {
-    flexDirection: 'row',
-    gap: SPACING.sm,
-    marginHorizontal: SPACING.lg,
-    marginBottom: SPACING.xl,
+    flexDirection: 'row', gap: SPACING.sm,
+    marginHorizontal: SPACING.lg, marginBottom: SPACING.xl,
   },
   statBox: {
     flex: 1, alignItems: 'center',
@@ -355,44 +410,82 @@ const styles = StyleSheet.create({
   statValue: { fontFamily: FONTS.playfair, fontSize: 22, color: COLORS.orange },
   statLabel: { fontFamily: FONTS.dmRegular, fontSize: 11, color: COLORS.muted, marginTop: 2 },
 
-  // Sections
+  // Section
   section: { marginHorizontal: SPACING.lg, marginBottom: SPACING.xl },
+  sectionTitleRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: SPACING.sm,
+  },
   sectionTitle: {
     fontFamily: FONTS.dmMedium, fontSize: 11,
-    color: COLORS.muted, letterSpacing: 0.8,
-    textTransform: 'uppercase',
-    marginBottom: SPACING.sm,
+    color: COLORS.muted, letterSpacing: 0.8, textTransform: 'uppercase',
+  },
+  sectionCount: { fontFamily: FONTS.dmRegular, fontSize: 11, color: COLORS.muted },
+
+  emptyCard: {
+    backgroundColor: COLORS.card, borderRadius: RADIUS.lg,
+    borderWidth: 1, borderColor: COLORS.border.subtle,
+    padding: SPACING.lg, alignItems: 'center',
+  },
+  emptyCardText: { fontFamily: FONTS.dmRegular, fontSize: 13, color: COLORS.muted },
+
+  // Badges
+  badgeGrid: { gap: SPACING.sm },
+  badgeChip: {
+    flexDirection: 'row', alignItems: 'center', gap: SPACING.md,
+    borderRadius: RADIUS.lg, borderWidth: 1,
+    paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm,
+  },
+  badgeEmoji: { fontSize: 24 },
+  badgeName: { fontFamily: FONTS.dmMedium, fontSize: 13 },
+  badgeDesc: { fontFamily: FONTS.dmRegular, fontSize: 11, color: COLORS.muted, marginTop: 1 },
+
+  // Passport
+  passportGrid: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm,
+  },
+  passportStamp: {
+    width: '31%', aspectRatio: 1,
+    borderRadius: RADIUS.lg, borderWidth: 1,
+    alignItems: 'center', justifyContent: 'center',
+    padding: SPACING.xs, position: 'relative',
+  },
+  passportStampEarned: {
+    backgroundColor: COLORS.overlay.orange10,
+    borderColor: COLORS.border.default,
+  },
+  passportStampEmpty: {
+    backgroundColor: COLORS.card,
+    borderColor: COLORS.border.subtle,
+  },
+  passportStampIcon: { fontSize: 20, marginBottom: 4 },
+  passportStampName: {
+    fontFamily: FONTS.dmMedium, fontSize: 10,
+    textAlign: 'center', lineHeight: 13,
+  },
+  passportStampNameEarned: { color: COLORS.cream },
+  passportStampNameEmpty: { color: COLORS.muted },
+  passportStampCheck: {
+    position: 'absolute', top: 5, right: 5,
+    width: 14, height: 14, borderRadius: 7,
+    backgroundColor: COLORS.orange,
+    alignItems: 'center', justifyContent: 'center',
   },
 
   // Location card
   locationCard: {
-    backgroundColor: COLORS.card,
-    borderRadius: RADIUS.xl,
-    borderWidth: 1, borderColor: COLORS.border.subtle,
-    overflow: 'hidden',
+    backgroundColor: COLORS.card, borderRadius: RADIUS.xl,
+    borderWidth: 1, borderColor: COLORS.border.subtle, overflow: 'hidden',
   },
   locationActiveBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(52,199,89,0.20)',
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: SPACING.lg, paddingVertical: SPACING.sm,
+    borderBottomWidth: 1, borderBottomColor: 'rgba(52,199,89,0.20)',
   },
-  locationActiveDot: {
-    width: 7, height: 7, borderRadius: 99,
-    backgroundColor: COLORS.status.success,
-  },
-  locationActiveText: {
-    fontFamily: FONTS.dmMedium, fontSize: 11,
-    color: COLORS.status.success, flex: 1,
-  },
+  locationActiveDot: { width: 7, height: 7, borderRadius: 99, backgroundColor: COLORS.status.success },
+  locationActiveText: { fontFamily: FONTS.dmMedium, fontSize: 11, color: COLORS.status.success, flex: 1 },
   locationToggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.md,
-    padding: SPACING.lg,
+    flexDirection: 'row', alignItems: 'center', gap: SPACING.md, padding: SPACING.lg,
   },
   locationIconBg: {
     width: 36, height: 36, borderRadius: RADIUS.sm,
@@ -404,44 +497,25 @@ const styles = StyleSheet.create({
   locationLabel: { fontFamily: FONTS.dmMedium, fontSize: 15, color: COLORS.cream },
   locationSub: { fontFamily: FONTS.dmRegular, fontSize: 12, color: COLORS.muted, marginTop: 2 },
   permissionNote: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 6,
-    paddingHorizontal: SPACING.lg,
-    paddingBottom: SPACING.sm,
+    flexDirection: 'row', alignItems: 'flex-start', gap: 6,
+    paddingHorizontal: SPACING.lg, paddingBottom: SPACING.sm,
   },
-  permissionNoteText: {
-    fontFamily: FONTS.dmRegular, fontSize: 12,
-    color: COLORS.amber, flex: 1, lineHeight: 17,
-  },
+  permissionNoteText: { fontFamily: FONTS.dmRegular, fontSize: 12, color: COLORS.amber, flex: 1, lineHeight: 17 },
   locationPrivacyNote: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 6,
-    padding: SPACING.lg,
-    paddingTop: 0,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border.subtle,
-    marginTop: SPACING.xs,
+    flexDirection: 'row', alignItems: 'flex-start', gap: 6,
+    padding: SPACING.lg, paddingTop: 0,
+    borderTopWidth: 1, borderTopColor: COLORS.border.subtle, marginTop: SPACING.xs,
   },
-  locationPrivacyText: {
-    fontFamily: FONTS.dmRegular, fontSize: 12,
-    color: COLORS.muted, flex: 1, lineHeight: 17,
-  },
+  locationPrivacyText: { fontFamily: FONTS.dmRegular, fontSize: 12, color: COLORS.muted, flex: 1, lineHeight: 17 },
 
   // Settings card
   settingsCard: {
-    backgroundColor: COLORS.card,
-    borderRadius: RADIUS.xl,
-    borderWidth: 1, borderColor: COLORS.border.subtle,
-    overflow: 'hidden',
+    backgroundColor: COLORS.card, borderRadius: RADIUS.xl,
+    borderWidth: 1, borderColor: COLORS.border.subtle, overflow: 'hidden',
   },
   settingsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.md,
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.md,
+    flexDirection: 'row', alignItems: 'center', gap: SPACING.md,
+    paddingHorizontal: SPACING.lg, paddingVertical: SPACING.md,
   },
   settingsIcon: {
     width: 34, height: 34, borderRadius: RADIUS.sm,
@@ -450,26 +524,14 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: COLORS.border.subtle,
   },
   settingsIconDanger: {
-    backgroundColor: 'rgba(255,59,48,0.08)',
-    borderColor: 'rgba(255,59,48,0.20)',
+    backgroundColor: 'rgba(255,59,48,0.08)', borderColor: 'rgba(255,59,48,0.20)',
   },
   settingsLabel: { flex: 1 },
   settingsLabelText: { fontFamily: FONTS.dmMedium, fontSize: 14, color: COLORS.cream },
   settingsSub: { fontFamily: FONTS.dmRegular, fontSize: 12, color: COLORS.muted, marginTop: 1 },
   rowSep: { height: 1, backgroundColor: COLORS.border.subtle, marginLeft: 58 },
 
-  footer: { alignItems: 'center', paddingBottom: SPACING.xl },
-  footerLinks: {
-    flexDirection: 'row', alignItems: 'center',
-    gap: SPACING.sm, marginBottom: SPACING.sm,
-  },
-  footerLink: { fontFamily: FONTS.dmMedium, fontSize: 12, color: COLORS.muted },
-  footerDot: { fontFamily: FONTS.dmRegular, fontSize: 10, color: COLORS.muted },
-  version: {
-    fontFamily: FONTS.dmRegular, fontSize: 11,
-    color: COLORS.muted, textAlign: 'center',
-  },
-
+  // Owner card
   ownerCard: {
     borderRadius: RADIUS.xl, padding: SPACING.lg,
     flexDirection: 'row', alignItems: 'center',
@@ -482,29 +544,35 @@ const styles = StyleSheet.create({
   ownerVerified: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   ownerVerifiedText: { fontFamily: FONTS.dmMedium, fontSize: 11, color: COLORS.orange },
 
+  // Footer
+  footer: { alignItems: 'center', paddingBottom: SPACING.xl },
+  footerLinks: {
+    flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginBottom: SPACING.sm,
+  },
+  footerLink: { fontFamily: FONTS.dmMedium, fontSize: 12, color: COLORS.muted },
+  footerDot: { fontFamily: FONTS.dmRegular, fontSize: 10, color: COLORS.muted },
+  version: { fontFamily: FONTS.dmRegular, fontSize: 11, color: COLORS.muted, textAlign: 'center' },
+
   // Gate (signed out)
   gateContent: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: SPACING.xxxl },
   gateIconArea: {
     width: 110, height: 110, borderRadius: 55,
-    alignItems: 'center', justifyContent: 'center',
-    marginBottom: SPACING.xl,
+    alignItems: 'center', justifyContent: 'center', marginBottom: SPACING.xl,
   },
   gateTitle: {
     fontFamily: FONTS.playfair, fontSize: 26,
     color: COLORS.cream, textAlign: 'center', marginBottom: SPACING.sm,
   },
   gateSub: {
-    fontFamily: FONTS.dmRegular, fontSize: 15,
-    color: COLORS.muted, textAlign: 'center',
-    lineHeight: 22, marginBottom: SPACING.xl,
+    fontFamily: FONTS.dmRegular, fontSize: 15, color: COLORS.muted,
+    textAlign: 'center', lineHeight: 22, marginBottom: SPACING.xl,
   },
   signInBtn: {
     flexDirection: 'row', alignItems: 'center', gap: SPACING.sm,
     backgroundColor: COLORS.orange,
     paddingHorizontal: SPACING.xxl, paddingVertical: SPACING.md,
     borderRadius: RADIUS.full,
-    shadowColor: COLORS.orange,
-    shadowOffset: { width: 0, height: 4 },
+    shadowColor: COLORS.orange, shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4, shadowRadius: 12, elevation: 6,
   },
   signInText: { fontFamily: FONTS.dmMedium, fontSize: 15, color: '#FFFFFF' },

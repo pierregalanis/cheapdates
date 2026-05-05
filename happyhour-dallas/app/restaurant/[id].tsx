@@ -19,7 +19,7 @@ import { Analytics } from '@/lib/analytics';
 import { COLORS, FONTS, RADIUS, SPACING } from '@/constants/theme';
 import CrowdMeter, { CROWD_CONFIG } from '@/components/ui/CrowdMeter';
 import StarRating from '@/components/ui/StarRating';
-import { useRestaurantStore, type Restaurant, type HappyHour, type MenuItem } from '@/store/restaurantStore';
+import { useRestaurantStore, type Restaurant, type HappyHour, type MenuItem, type Deal } from '@/store/restaurantStore';
 import { useAuthStore } from '@/store/authStore';
 import { getActiveHappyHour, getRestaurantEmoji } from '@/lib/happyHourHelpers';
 import { checkIn } from '@/lib/checkin';
@@ -57,6 +57,39 @@ function buildScheduleRows(happyHours: HappyHour[]) {
   return Object.entries(groups).map(([key, days]) => {
     const [start, end] = key.split('|');
     return { days: days.join(', '), timeRange: `${formatTimeDisplay(start)} – ${formatTimeDisplay(end)}` };
+  });
+}
+
+const DOW_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function formatDealBadge(deal: Deal): string {
+  if (deal.discount_type === 'percentage' && deal.discount_value != null)
+    return `${deal.discount_value}% OFF`;
+  if (deal.discount_type === 'fixed' && deal.discount_value != null)
+    return `$${deal.discount_value % 1 === 0 ? deal.discount_value : deal.discount_value.toFixed(2)} OFF`;
+  if (deal.discount_type === 'bogo') return 'BOGO';
+  if (deal.discount_type === 'free_item') return 'FREE';
+  return 'DEAL';
+}
+
+function formatDealDays(days: number[] | null): string {
+  if (!days || days.length === 0 || days.length === 7) return 'Every day';
+  return days.map((d) => DOW_SHORT[d]).join(', ');
+}
+
+function getActiveDeals(deals: Deal[]): Deal[] {
+  const now = new Date();
+  const today = now.getDay();
+  const nowMins = now.getHours() * 60 + now.getMinutes();
+  return deals.filter((d) => {
+    if (!d.is_active) return false;
+    if (d.valid_days && d.valid_days.length > 0 && !d.valid_days.includes(today)) return false;
+    if (d.start_time && d.end_time) {
+      const [sh, sm] = d.start_time.split(':').map(Number);
+      const [eh, em] = d.end_time.split(':').map(Number);
+      if (nowMins < sh * 60 + sm || nowMins > eh * 60 + em) return false;
+    }
+    return true;
   });
 }
 
@@ -131,6 +164,7 @@ export default function RestaurantDetailScreen() {
       setCheckedIn(true);
       const parts: string[] = [`+${result.pointsEarned} pts`];
       if (result.isNewNeighborhood) parts.push('new neighborhood!');
+      if (result.leveledUpTo) parts.push(`⬆️ ${result.leveledUpTo}!`);
       if (result.badgesEarned.length) parts.push(`🏅 ${result.badgesEarned.join(', ')}`);
       setCheckInMsg(parts.join(' · '));
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -161,6 +195,8 @@ export default function RestaurantDetailScreen() {
   const countdownColor = minLeft <= 30 ? COLORS.status.error : minLeft <= 60 ? COLORS.amber : COLORS.orange;
   const scheduleRows = buildScheduleRows(detail.happy_hours ?? []);
   const dealCategories = buildDealCategories(detail.menu_items ?? []);
+  const activeDeals = getActiveDeals(detail.deals ?? []);
+  const allDeals = (detail.deals ?? []).filter((d) => d.is_active);
   const reviews = detail.reviews ?? [];
   const firstScheduleEnd = scheduleRows[0]?.timeRange.split('–')[1]?.trim() ?? '';
 
@@ -319,6 +355,59 @@ export default function RestaurantDetailScreen() {
                 ))}
               </View>
             ))}
+          </View>
+        )}
+
+        {/* ── Special Deals ── */}
+        {allDeals.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionTitleRow}>
+              <View style={styles.sectionIconBg}>
+                <Ionicons name="gift-outline" size={16} color={COLORS.orange} />
+              </View>
+              <Text style={styles.sectionTitle}>Special Deals</Text>
+            </View>
+            {allDeals.map((deal, i) => {
+              const isLive = activeDeals.some((d) => d.id === deal.id);
+              return (
+                <View
+                  key={deal.id}
+                  style={[
+                    styles.specialDealRow,
+                    i > 0 && styles.specialDealBorder,
+                  ]}
+                >
+                  <View style={[styles.dealBadge, isLive && styles.dealBadgeLive]}>
+                    <Text style={[styles.dealBadgeText, isLive && styles.dealBadgeTextLive]}>
+                      {formatDealBadge(deal)}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1, gap: 2 }}>
+                    <Text style={styles.specialDealTitle}>{deal.title}</Text>
+                    {deal.description ? (
+                      <Text style={styles.specialDealDesc} numberOfLines={2}>{deal.description}</Text>
+                    ) : null}
+                    <View style={styles.specialDealMeta}>
+                      <Text style={styles.specialDealMetaText}>{formatDealDays(deal.valid_days)}</Text>
+                      {deal.start_time && deal.end_time ? (
+                        <>
+                          <Text style={styles.specialDealMetaDot}>·</Text>
+                          <Text style={styles.specialDealMetaText}>
+                            {formatTimeDisplay(deal.start_time)} – {formatTimeDisplay(deal.end_time)}
+                          </Text>
+                        </>
+                      ) : null}
+                    </View>
+                  </View>
+                  {isLive && (
+                    <View style={styles.livePill}>
+                      <View style={styles.liveDot} />
+                      <Text style={styles.liveText}>Live</Text>
+                    </View>
+                  )}
+                </View>
+              );
+            })}
           </View>
         )}
 
@@ -617,6 +706,38 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(255,179,71,0.30)',
   },
   dealPrice: { fontFamily: FONTS.dmMedium, fontSize: 13, color: COLORS.amber },
+
+  specialDealRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: SPACING.md,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md,
+  },
+  specialDealBorder: { borderTopWidth: 1, borderTopColor: COLORS.border.subtle },
+  dealBadge: {
+    paddingHorizontal: 10, paddingVertical: 5,
+    borderRadius: RADIUS.md,
+    backgroundColor: COLORS.overlay.inputBg,
+    borderWidth: 1, borderColor: COLORS.border.default,
+    minWidth: 56, alignItems: 'center',
+  },
+  dealBadgeLive: { backgroundColor: COLORS.overlay.orange15, borderColor: COLORS.orange + '60' },
+  dealBadgeText: { fontFamily: FONTS.dmMedium, fontSize: 12, color: COLORS.muted },
+  dealBadgeTextLive: { color: COLORS.orange },
+  specialDealTitle: { fontFamily: FONTS.dmMedium, fontSize: 14, color: COLORS.cream },
+  specialDealDesc: { fontFamily: FONTS.dmRegular, fontSize: 12, color: COLORS.muted, lineHeight: 17 },
+  specialDealMeta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  specialDealMetaText: { fontFamily: FONTS.dmRegular, fontSize: 11, color: COLORS.muted },
+  specialDealMetaDot: { fontFamily: FONTS.dmRegular, fontSize: 11, color: COLORS.muted },
+  livePill: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 8, paddingVertical: 4,
+    backgroundColor: 'rgba(52,199,89,0.12)',
+    borderRadius: RADIUS.full, borderWidth: 1, borderColor: 'rgba(52,199,89,0.30)',
+  },
+  liveDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: COLORS.status.success },
+  liveText: { fontFamily: FONTS.dmMedium, fontSize: 10, color: COLORS.status.success },
 
   infoRow: {
     flexDirection: 'row',

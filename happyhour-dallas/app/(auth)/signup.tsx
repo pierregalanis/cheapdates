@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -34,6 +34,8 @@ export default function SignupScreen() {
   const [nameFocused, setNameFocused]     = useState(false);
   const [emailFocused, setEmailFocused]   = useState(false);
   const [passFocused, setPassFocused]     = useState(false);
+
+  const nameInputRef = useRef<TextInput>(null);
 
   const { signUp, signInWithApple } = useAuthStore();
 
@@ -143,25 +145,31 @@ export default function SignupScreen() {
 
           <View style={styles.form}>
             {/* Full name */}
-            <View style={[styles.inputWrap, nameFocused && styles.inputWrapFocused]}>
-              <Ionicons
-                name="person-outline"
-                size={17}
-                color={nameFocused ? COLORS.orange : COLORS.muted}
-                style={styles.inputIcon}
-              />
-              <TextInput
-                style={styles.input}
-                placeholder="Full name"
-                placeholderTextColor={COLORS.faded}
-                autoCapitalize="words"
-                value={fullName}
-                onChangeText={setFullName}
-                onFocus={() => setNameFocused(true)}
-                onBlur={() => setNameFocused(false)}
-                keyboardAppearance="dark"
-              />
-            </View>
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={() => nameInputRef.current?.focus()}
+            >
+              <View style={[styles.inputWrap, nameFocused && styles.inputWrapFocused]}>
+                <Ionicons
+                  name="person-outline"
+                  size={17}
+                  color={nameFocused ? COLORS.orange : COLORS.muted}
+                  style={styles.inputIcon}
+                />
+                <TextInput
+                  ref={nameInputRef}
+                  style={styles.input}
+                  placeholder="Full name"
+                  placeholderTextColor={COLORS.faded}
+                  autoCapitalize="words"
+                  value={fullName}
+                  onChangeText={setFullName}
+                  onFocus={() => setNameFocused(true)}
+                  onBlur={() => setNameFocused(false)}
+                  keyboardAppearance="dark"
+                />
+              </View>
+            </TouchableOpacity>
 
             {/* Email */}
             <View style={[styles.inputWrap, emailFocused && styles.inputWrapFocused]}>

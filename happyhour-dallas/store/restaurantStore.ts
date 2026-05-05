@@ -25,6 +25,20 @@ export interface MenuItem {
   is_available: boolean;
 }
 
+export interface Deal {
+  id: string;
+  restaurant_id: string;
+  title: string;
+  description: string | null;
+  discount_type: 'percentage' | 'fixed' | 'bogo' | 'free_item' | 'other';
+  discount_value: number | null;
+  min_purchase: number | null;
+  valid_days: number[] | null;
+  start_time: string | null;
+  end_time: string | null;
+  is_active: boolean;
+}
+
 export interface Review {
   id: string;
   user_id: string;
@@ -68,6 +82,7 @@ export interface Restaurant {
   updated_at: string;
   happy_hours?: HappyHour[];
   menu_items?: MenuItem[];
+  deals?: Deal[];
   reviews?: Review[];
 }
 
@@ -127,7 +142,7 @@ export const useRestaurantStore = create<RestaurantState>((set, get) => ({
     try {
       let query = supabase
         .from('restaurants')
-        .select('*, happy_hours(*), menu_items(*)')
+        .select('*, happy_hours(*), menu_items(*), deals(*)')
         .eq('status', 'approved')
         .eq('city', filters.city ?? 'Dallas')
         .order('is_verified', { ascending: false })
@@ -157,6 +172,7 @@ export const useRestaurantStore = create<RestaurantState>((set, get) => ({
           *,
           happy_hours (*),
           menu_items (*),
+          deals (*),
           reviews (*, profiles(full_name, avatar_url))
         `)
         .eq('id', id)
@@ -230,7 +246,7 @@ export const useRestaurantStore = create<RestaurantState>((set, get) => ({
       }
       const { data, error } = await supabase
         .from('restaurants')
-        .select('*, happy_hours(*), menu_items(*)')
+        .select('*, happy_hours(*), menu_items(*), deals(*)')
         .in('id', ids)
         .eq('status', 'approved');
       if (error) throw error;

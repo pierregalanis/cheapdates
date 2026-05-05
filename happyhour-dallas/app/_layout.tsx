@@ -118,6 +118,10 @@ export default function RootLayout() {
         <Stack.Screen name="city-picker" />
         <Stack.Screen name="chat" />
         <Stack.Screen name="owner/dashboard" />
+        <Stack.Screen name="owner/happy-hours" />
+        <Stack.Screen name="owner/menu" />
+        <Stack.Screen name="owner/deals" />
+        <Stack.Screen name="owner/info" />
         <Stack.Screen name="+not-found" />
       </Stack>
     </>

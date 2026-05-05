@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, memo } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   RefreshControl,
   ActivityIndicator,
 } from 'react-native';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -65,7 +66,7 @@ function formatCountdown(minLeft: number): string {
 
 // ─── Cards ────────────────────────────────────────────────────────────────────
 
-function SpotCard({ restaurant }: { restaurant: Restaurant }) {
+const SpotCard = memo(function SpotCard({ restaurant }: { restaurant: Restaurant }) {
   const crowd = CROWD[restaurant.crowd_level];
   const hh = getActiveHappyHour(restaurant);
   const minLeft = hh?.minLeft ?? 0;
@@ -153,9 +154,9 @@ function SpotCard({ restaurant }: { restaurant: Restaurant }) {
       </View>
     </TouchableOpacity>
   );
-}
+});
 
-function ListCard({ restaurant }: { restaurant: Restaurant }) {
+const ListCard = memo(function ListCard({ restaurant }: { restaurant: Restaurant }) {
   const crowd = CROWD[restaurant.crowd_level];
   const hh = getActiveHappyHour(restaurant);
   const minLeft = hh?.minLeft ?? 0;
@@ -217,13 +218,14 @@ function ListCard({ restaurant }: { restaurant: Restaurant }) {
       </View>
     </TouchableOpacity>
   );
-}
+});
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function ExploreScreen() {
   const { restaurants, loading, error, fetchRestaurants } = useRestaurantStore();
   const { selectedCity } = useCityStore();
+  const tabBarHeight = useBottomTabBarHeight();
   const [activeFilter, setActiveFilter] = useState('now');
   const [refreshing, setRefreshing] = useState(false);
   const pulseOpacity = useRef(new Animated.Value(1)).current;
@@ -276,7 +278,7 @@ export default function ExploreScreen() {
 
       {/* Floating AI chat button */}
       <TouchableOpacity
-        style={styles.chatFab}
+        style={[styles.chatFab, { bottom: tabBarHeight + 16 }]}
         onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); nav('/chat'); }}
         activeOpacity={0.85}
       >
@@ -304,7 +306,11 @@ export default function ExploreScreen() {
         data={filtered}
         keyExtractor={(item) => item.id}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[styles.listContent, { paddingBottom: tabBarHeight + 80 }]}
+        initialNumToRender={6}
+        maxToRenderPerBatch={8}
+        windowSize={5}
+        removeClippedSubviews
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -476,7 +482,7 @@ export default function ExploreScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.dark },
-  listContent: { paddingBottom: 48 },
+  listContent: {},
   loadingOverlay: { position: 'absolute', top: 120, left: 0, right: 0, alignItems: 'center', zIndex: 10 },
 
   // ── Header ──
@@ -845,7 +851,6 @@ const styles = StyleSheet.create({
   // ── Chat FAB ──
   chatFab: {
     position: 'absolute',
-    bottom: 20,
     right: SPACING.lg,
     zIndex: 20,
     shadowColor: COLORS.orange,

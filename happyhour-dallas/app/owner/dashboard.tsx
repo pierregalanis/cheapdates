@@ -244,9 +244,40 @@ export default function OwnerDashboard() {
           </View>
         </View>
 
+        {/* Manage */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Manage</Text>
+          <View style={styles.manageGrid}>
+            {[
+              { icon: 'time-outline',       label: 'Happy Hours', sub: 'Times & days',     route: '/owner/happy-hours' },
+              { icon: 'restaurant-outline', label: 'Menu Items',  sub: 'Prices & specials', route: '/owner/menu'        },
+              { icon: 'pricetag-outline',   label: 'Deals',       sub: 'Limited offers',   route: '/owner/deals'       },
+              { icon: 'create-outline',     label: 'Info',        sub: 'Details & tags',   route: '/owner/info'        },
+            ].map((item) => (
+              <TouchableOpacity
+                key={item.route}
+                style={styles.manageCard}
+                activeOpacity={0.75}
+                onPress={() => router.push(item.route as any)}
+              >
+                <View style={styles.manageIconBg}>
+                  <Ionicons name={item.icon as any} size={20} color={COLORS.orange} />
+                </View>
+                <Text style={styles.manageLabel}>{item.label}</Text>
+                <Text style={styles.manageSub}>{item.sub}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
         {/* Today's happy hours */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Today's Happy Hours</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Today's Happy Hours</Text>
+            <TouchableOpacity onPress={() => router.push('/owner/happy-hours' as any)}>
+              <Text style={styles.editLink}>Edit →</Text>
+            </TouchableOpacity>
+          </View>
           <View style={styles.card}>
             {data.todayHours.length > 0 ? data.todayHours.map((hh, i) => (
               <View key={i} style={[styles.hhRow, i > 0 && { borderTopWidth: 1, borderTopColor: COLORS.border.subtle }]}>
@@ -269,7 +300,9 @@ export default function OwnerDashboard() {
 
         {/* Recent reviews */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Recent Reviews</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Recent Reviews</Text>
+          </View>
           {data.recentReviews.length === 0 ? (
             <View style={styles.card}>
               <Text style={styles.noHhText}>No reviews yet — share your listing to get started.</Text>
@@ -388,4 +421,24 @@ const styles = StyleSheet.create({
   reviewStars: { flexDirection: 'row', gap: 2 },
   reviewMeta: { fontFamily: FONTS.dmRegular, fontSize: 11, color: COLORS.muted },
   reviewBody: { fontFamily: FONTS.dmRegular, fontSize: 14, color: COLORS.cream, lineHeight: 20 },
+
+  editLink: { fontFamily: FONTS.dmMedium, fontSize: 13, color: COLORS.orange },
+
+  manageGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm },
+  manageCard: {
+    width: '48%',
+    backgroundColor: COLORS.card,
+    borderRadius: RADIUS.xl,
+    borderWidth: 1, borderColor: COLORS.border.subtle,
+    padding: SPACING.lg, gap: 6,
+  },
+  manageIconBg: {
+    width: 40, height: 40, borderRadius: RADIUS.md,
+    backgroundColor: COLORS.overlay.orange10,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: COLORS.border.default,
+    marginBottom: 4,
+  },
+  manageLabel: { fontFamily: FONTS.dmMedium, fontSize: 14, color: COLORS.cream },
+  manageSub: { fontFamily: FONTS.dmRegular, fontSize: 11, color: COLORS.muted },
 });
