@@ -17,7 +17,7 @@
         "buildConfiguration": "Release"
       },
       "env": {
-        "EXPO_PUBLIC_SUPABASE_URL": "https://pleopszyjvdthtyeszft.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://pleopszyiydthtyeszft.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBsZW9wc3p5aXlkdGh0eWVzemZ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3NzI5MTQsImV4cCI6MjA5MzM0ODkxNH0.tzHcPCnwWy0lt74H652LDOXHu2boDT3pFl6vU-6lifg"
       }
     },
@@ -28,7 +28,7 @@
         "buildConfiguration": "Release"
       },
       "env": {
-        "EXPO_PUBLIC_SUPABASE_URL": "https://pleopszyjvdthtyeszft.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://pleopszyiydthtyeszft.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBsZW9wc3p5aXlkdGh0eWVzemZ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3NzI5MTQsImV4cCI6MjA5MzM0ODkxNH0.tzHcPCnwWy0lt74H652LDOXHu2boDT3pFl6vU-6lifg"
       }
     }
