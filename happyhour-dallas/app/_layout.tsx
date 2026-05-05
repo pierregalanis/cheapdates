@@ -121,6 +121,7 @@ export default function RootLayout() {
         <Stack.Screen name="owner/happy-hours" />
         <Stack.Screen name="owner/menu" />
         <Stack.Screen name="owner/deals" />
+        <Stack.Screen name="owner/reservations" />
         <Stack.Screen name="owner/info" />
         <Stack.Screen name="+not-found" />
       </Stack>

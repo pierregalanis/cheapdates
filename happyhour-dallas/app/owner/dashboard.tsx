@@ -25,6 +25,7 @@ interface DashboardData {
   checkinsThisWeek: number;
   todayHours: { start_time: string; end_time: string; label: string | null }[];
   recentReviews: { id: string; rating: number; body: string | null; created_at: string; profiles: { full_name: string | null } | null }[];
+  todayReservations: { id: string; guest_name: string; party_size: number; reservation_time: string; status: string }[];
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -69,7 +70,9 @@ export default function OwnerDashboard() {
 
     const todayDow = new Date().getDay();
 
-    const [restaurantRes, checkinsRes, hoursRes, reviewsRes] = await Promise.all([
+    const todayDate = new Date().toISOString().split('T')[0];
+
+    const [restaurantRes, checkinsRes, hoursRes, reviewsRes, reservationsRes] = await Promise.all([
       supabase
         .from('restaurants')
         .select('name, neighborhood, average_rating, review_count, is_verified, crowd_level')
@@ -92,6 +95,13 @@ export default function OwnerDashboard() {
         .eq('restaurant_id', restaurantId)
         .order('created_at', { ascending: false })
         .limit(5),
+      supabase
+        .from('reservations')
+        .select('id, guest_name, party_size, reservation_time, status')
+        .eq('restaurant_id', restaurantId)
+        .eq('reservation_date', todayDate)
+        .neq('status', 'cancelled')
+        .order('reservation_time', { ascending: true }),
     ]);
 
     if (restaurantRes.data) {
@@ -101,6 +111,7 @@ export default function OwnerDashboard() {
         checkinsThisWeek: checkinsRes.count ?? 0,
         todayHours: hoursRes.data ?? [],
         recentReviews: (reviewsRes.data ?? []) as DashboardData['recentReviews'],
+        todayReservations: (reservationsRes.data ?? []) as DashboardData['todayReservations'],
       });
     }
   }, [restaurantId]);
@@ -249,10 +260,11 @@ export default function OwnerDashboard() {
           <Text style={styles.sectionTitle}>Manage</Text>
           <View style={styles.manageGrid}>
             {[
-              { icon: 'time-outline',       label: 'Happy Hours', sub: 'Times & days',     route: '/owner/happy-hours' },
-              { icon: 'restaurant-outline', label: 'Menu Items',  sub: 'Prices & specials', route: '/owner/menu'        },
-              { icon: 'pricetag-outline',   label: 'Deals',       sub: 'Limited offers',   route: '/owner/deals'       },
-              { icon: 'create-outline',     label: 'Info',        sub: 'Details & tags',   route: '/owner/info'        },
+              { icon: 'time-outline',       label: 'Happy Hours',  sub: 'Times & days',      route: '/owner/happy-hours'  },
+              { icon: 'restaurant-outline', label: 'Menu Items',   sub: 'Prices & specials',  route: '/owner/menu'         },
+              { icon: 'pricetag-outline',   label: 'Deals',        sub: 'Limited offers',     route: '/owner/deals'        },
+              { icon: 'calendar-outline',   label: 'Reservations', sub: 'Bookings & status',  route: '/owner/reservations' },
+              { icon: 'create-outline',     label: 'Info',         sub: 'Details & tags',     route: '/owner/info'         },
             ].map((item) => (
               <TouchableOpacity
                 key={item.route}
@@ -267,6 +279,45 @@ export default function OwnerDashboard() {
                 <Text style={styles.manageSub}>{item.sub}</Text>
               </TouchableOpacity>
             ))}
+          </View>
+        </View>
+
+        {/* Today's reservations */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Today's Reservations</Text>
+            <TouchableOpacity onPress={() => router.push('/owner/reservations' as any)}>
+              <Text style={styles.editLink}>View all →</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.card}>
+            {data.todayReservations.length === 0 ? (
+              <View style={styles.hhRow}>
+                <Ionicons name="calendar-outline" size={16} color={COLORS.muted} />
+                <Text style={styles.noHhText}>No reservations today</Text>
+              </View>
+            ) : (
+              data.todayReservations.map((r, i) => {
+                const statusColors: Record<string, string> = {
+                  pending: COLORS.amber, confirmed: COLORS.status.success,
+                  no_show: COLORS.muted, cancelled: COLORS.status.error,
+                };
+                return (
+                  <View key={r.id} style={[styles.hhRow, i > 0 && { borderTopWidth: 1, borderTopColor: COLORS.border.subtle }]}>
+                    <View style={[styles.hhActiveDot, { backgroundColor: statusColors[r.status] ?? COLORS.muted }]} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.hhTime}>{r.guest_name}</Text>
+                      <Text style={styles.hhLabel}>Party of {r.party_size} · {formatTime(r.reservation_time)}</Text>
+                    </View>
+                    <View style={[{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: RADIUS.full, backgroundColor: (statusColors[r.status] ?? COLORS.muted) + '18' }]}>
+                      <Text style={[{ fontFamily: FONTS.dmMedium, fontSize: 10, color: statusColors[r.status] ?? COLORS.muted }]}>
+                        {r.status.charAt(0).toUpperCase() + r.status.slice(1)}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })
+            )}
           </View>
         </View>
 
