@@ -57,6 +57,7 @@ export default function ProfileScreen() {
   const [stats, setStats] = useState({ checkins: 0, reviews: 0, stamps: 0 });
   const [badges, setBadges] = useState<Array<{ badge_type: string; badge_name: string }>>([]);
   const [earnedNeighborhoods, setEarnedNeighborhoods] = useState<string[]>([]);
+  const [socialCounts, setSocialCounts] = useState({ following: 0, followers: 0 });
 
   useEffect(() => {
     if (!user) return;
@@ -67,10 +68,13 @@ export default function ProfileScreen() {
       supabase.from('passport_stamps').select('id', { count: 'exact', head: true }).eq('user_id', user.id),
       supabase.from('user_badges').select('badge_type, badge_name').eq('user_id', user.id),
       supabase.from('passport_stamps').select('neighborhood').eq('user_id', user.id),
-    ]).then(([c, r, s, b, stamps]) => {
+      supabase.from('follows').select('id', { count: 'exact', head: true }).eq('follower_id', user.id),
+      supabase.from('follows').select('id', { count: 'exact', head: true }).eq('following_id', user.id),
+    ]).then(([c, r, s, b, stamps, following, followers]) => {
       setStats({ checkins: c.count ?? 0, reviews: r.count ?? 0, stamps: s.count ?? 0 });
       setBadges((b.data as any[]) ?? []);
       setEarnedNeighborhoods((stamps.data ?? []).map((s: any) => s.neighborhood));
+      setSocialCounts({ following: following.count ?? 0, followers: followers.count ?? 0 });
     });
   }, [user?.id]);
 
@@ -91,7 +95,7 @@ export default function ProfileScreen() {
           >
             <Ionicons name="person-outline" size={52} color={COLORS.orange} />
           </LinearGradient>
-          <Text style={styles.gateTitle}>Join HappyHour Dallas</Text>
+          <Text style={styles.gateTitle}>Join Cheap Dates</Text>
           <Text style={styles.gateSub}>
             Track check-ins, earn rewards,{'\n'}save your favorite spots, and{'\n'}climb the leaderboard
           </Text>
@@ -213,6 +217,34 @@ export default function ProfileScreen() {
           </View>
         </View>
 
+        {/* ── Social ── */}
+        <View style={styles.section}>
+          <View style={styles.sectionTitleRow}>
+            <Text style={styles.sectionTitle}>Social</Text>
+          </View>
+          <View style={styles.socialRow}>
+            <TouchableOpacity style={styles.socialStat} onPress={() => router.push({ pathname: '/friends' as any, params: { tab: 'following' } })}>
+              <Text style={styles.socialCount}>{socialCounts.following}</Text>
+              <Text style={styles.socialLabel}>Following</Text>
+            </TouchableOpacity>
+            <View style={styles.socialDivider} />
+            <TouchableOpacity style={styles.socialStat} onPress={() => router.push({ pathname: '/friends' as any, params: { tab: 'followers' } })}>
+              <Text style={styles.socialCount}>{socialCounts.followers}</Text>
+              <Text style={styles.socialLabel}>Followers</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.socialBtns}>
+            <TouchableOpacity style={styles.socialBtn} onPress={() => router.push('/friends' as any)}>
+              <Ionicons name="person-add-outline" size={15} color={COLORS.orange} />
+              <Text style={styles.socialBtnText}>Find Friends</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.socialBtn} onPress={() => router.push('/activity' as any)}>
+              <Ionicons name="pulse-outline" size={15} color={COLORS.orange} />
+              <Text style={styles.socialBtnText}>Activity Feed</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
         {/* ── Location sharing ── */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Privacy</Text>
@@ -326,7 +358,7 @@ export default function ProfileScreen() {
             <SettingsRow
               icon="help-circle-outline"
               label="Help & Support"
-              sub="hello@happyhourdallas.com"
+              sub={LINKS.support.replace('mailto:', '')}
               onPress={() => Linking.openURL(LINKS.support)}
             />
             <View style={styles.rowSep} />
@@ -353,7 +385,7 @@ export default function ProfileScreen() {
               <Text style={styles.footerLink}>Support</Text>
             </TouchableOpacity>
           </View>
-          <Text style={styles.version}>HappyHour Dallas · v1.0.0</Text>
+          <Text style={styles.version}>Cheap Dates · v1.0</Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -471,6 +503,29 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.orange,
     alignItems: 'center', justifyContent: 'center',
   },
+
+  // Social
+  socialRow: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.card,
+    borderRadius: RADIUS.xl,
+    borderWidth: 1, borderColor: COLORS.border.subtle,
+    marginBottom: SPACING.sm,
+    overflow: 'hidden',
+  },
+  socialStat: { flex: 1, alignItems: 'center', paddingVertical: SPACING.md },
+  socialCount: { fontFamily: FONTS.playfair, fontSize: 22, color: COLORS.orange },
+  socialLabel: { fontFamily: FONTS.dmRegular, fontSize: 11, color: COLORS.muted, marginTop: 2 },
+  socialDivider: { width: 1, backgroundColor: COLORS.border.subtle, marginVertical: SPACING.sm },
+  socialBtns: { flexDirection: 'row', gap: SPACING.sm },
+  socialBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    paddingVertical: SPACING.md,
+    backgroundColor: COLORS.card,
+    borderRadius: RADIUS.xl,
+    borderWidth: 1, borderColor: COLORS.border.subtle,
+  },
+  socialBtnText: { fontFamily: FONTS.dmMedium, fontSize: 13, color: COLORS.orange },
 
   // Location card
   locationCard: {

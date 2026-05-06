@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, ScrollView,
-  StyleSheet, ActivityIndicator, RefreshControl,
+  View, Text, TouchableOpacity, ScrollView, Modal, TextInput,
+  StyleSheet, ActivityIndicator, RefreshControl, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,7 +24,7 @@ interface DashboardData {
   crowd_level: number;
   checkinsThisWeek: number;
   todayHours: { start_time: string; end_time: string; label: string | null }[];
-  recentReviews: { id: string; rating: number; body: string | null; created_at: string; profiles: { full_name: string | null } | null }[];
+  recentReviews: { id: string; rating: number; body: string | null; restaurant_reply: string | null; created_at: string; profiles: { full_name: string | null } | null }[];
   todayReservations: { id: string; guest_name: string; party_size: number; reservation_time: string; status: string }[];
 }
 
@@ -62,6 +62,9 @@ export default function OwnerDashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [updatingCrowd, setUpdatingCrowd] = useState(false);
   const [crowdLevel, setCrowdLevel] = useState(ownedRestaurant?.crowd_level ?? 0);
+  const [replyModal, setReplyModal] = useState<{ reviewId: string; existing: string } | null>(null);
+  const [replyText, setReplyText] = useState('');
+  const [savingReply, setSavingReply] = useState(false);
 
   const restaurantId = ownedRestaurant?.id;
 
@@ -91,7 +94,7 @@ export default function OwnerDashboard() {
         .eq('is_active', true),
       supabase
         .from('reviews')
-        .select('id, rating, body, created_at, profiles(full_name)')
+        .select('id, rating, body, restaurant_reply, created_at, profiles(full_name)')
         .eq('restaurant_id', restaurantId)
         .order('created_at', { ascending: false })
         .limit(5),
@@ -110,7 +113,7 @@ export default function OwnerDashboard() {
         ...restaurantRes.data,
         checkinsThisWeek: checkinsRes.count ?? 0,
         todayHours: hoursRes.data ?? [],
-        recentReviews: (reviewsRes.data ?? []) as DashboardData['recentReviews'],
+        recentReviews: (reviewsRes.data ?? []) as unknown as DashboardData['recentReviews'],
         todayReservations: (reservationsRes.data ?? []) as DashboardData['todayReservations'],
       });
     }
@@ -125,6 +128,31 @@ export default function OwnerDashboard() {
     await fetchData();
     setRefreshing(false);
   }, [fetchData]);
+
+  const openReply = (reviewId: string, existing: string | null) => {
+    setReplyText(existing ?? '');
+    setReplyModal({ reviewId, existing: existing ?? '' });
+  };
+
+  const saveReply = async () => {
+    if (!replyModal || !restaurantId) return;
+    setSavingReply(true);
+    const reply = replyText.trim() || null;
+    await supabase.from('reviews').update({ restaurant_reply: reply }).eq('id', replyModal.reviewId);
+    setData((prev) =>
+      prev
+        ? {
+            ...prev,
+            recentReviews: prev.recentReviews.map((r) =>
+              r.id === replyModal.reviewId ? { ...r, restaurant_reply: reply } : r
+            ),
+          }
+        : prev
+    );
+    setSavingReply(false);
+    setReplyModal(null);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
 
   const updateCrowd = async (level: number) => {
     if (!restaurantId || updatingCrowd) return;
@@ -380,12 +408,69 @@ export default function OwnerDashboard() {
                   {review.body ? (
                     <Text style={styles.reviewBody} numberOfLines={3}>{review.body}</Text>
                   ) : null}
+                  {review.restaurant_reply ? (
+                    <View style={styles.replyPreview}>
+                      <Ionicons name="business-outline" size={11} color={COLORS.orange} />
+                      <Text style={styles.replyPreviewText} numberOfLines={2}>{review.restaurant_reply}</Text>
+                    </View>
+                  ) : null}
+                  <TouchableOpacity
+                    style={styles.replyBtn}
+                    onPress={() => openReply(review.id, review.restaurant_reply)}
+                  >
+                    <Ionicons name="chatbubble-outline" size={13} color={COLORS.orange} />
+                    <Text style={styles.replyBtnText}>
+                      {review.restaurant_reply ? 'Edit Reply' : 'Reply'}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
               ))}
             </View>
           )}
         </View>
       </ScrollView>
+
+      {/* Reply modal */}
+      <Modal visible={!!replyModal} transparent animationType="slide">
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+        >
+          <View style={styles.replyModalSheet}>
+            <Text style={styles.replyModalTitle}>Reply to Review</Text>
+            <TextInput
+              style={styles.replyInput}
+              value={replyText}
+              onChangeText={setReplyText}
+              placeholder="Thank the guest or address their feedback…"
+              placeholderTextColor={COLORS.faded}
+              multiline
+              numberOfLines={4}
+              keyboardAppearance="dark"
+              textAlignVertical="top"
+              autoFocus
+            />
+            <View style={styles.replyModalBtns}>
+              <TouchableOpacity
+                style={styles.replyCancelBtn}
+                onPress={() => setReplyModal(null)}
+              >
+                <Text style={styles.replyCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.replySaveBtn, savingReply && { opacity: 0.6 }]}
+                onPress={saveReply}
+                disabled={savingReply}
+              >
+                {savingReply
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={styles.replySaveText}>Post Reply</Text>
+                }
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -472,6 +557,60 @@ const styles = StyleSheet.create({
   reviewStars: { flexDirection: 'row', gap: 2 },
   reviewMeta: { fontFamily: FONTS.dmRegular, fontSize: 11, color: COLORS.muted },
   reviewBody: { fontFamily: FONTS.dmRegular, fontSize: 14, color: COLORS.cream, lineHeight: 20 },
+  replyPreview: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 5,
+    backgroundColor: COLORS.overlay.orange10,
+    borderRadius: RADIUS.sm, padding: SPACING.sm,
+    borderWidth: 1, borderColor: COLORS.border.default,
+  },
+  replyPreviewText: { fontFamily: FONTS.dmRegular, fontSize: 12, color: COLORS.muted, flex: 1, lineHeight: 17 },
+  replyBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10, paddingVertical: 5,
+    borderRadius: RADIUS.full,
+    backgroundColor: COLORS.overlay.orange10,
+    borderWidth: 1, borderColor: COLORS.border.default,
+  },
+  replyBtnText: { fontFamily: FONTS.dmMedium, fontSize: 12, color: COLORS.orange },
+
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'flex-end',
+  },
+  replyModalSheet: {
+    backgroundColor: COLORS.surface,
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    borderWidth: 1, borderColor: COLORS.border.subtle,
+    padding: SPACING.xl, paddingBottom: SPACING.xxxl,
+    gap: SPACING.lg,
+  },
+  replyModalTitle: { fontFamily: FONTS.playfair, fontSize: 20, color: COLORS.cream },
+  replyInput: {
+    backgroundColor: COLORS.overlay.inputBg,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1.5, borderColor: COLORS.border.default,
+    padding: SPACING.md,
+    minHeight: 110,
+    fontFamily: FONTS.dmRegular, fontSize: 15, color: COLORS.cream,
+    lineHeight: 22,
+  },
+  replyModalBtns: { flexDirection: 'row', gap: SPACING.sm },
+  replyCancelBtn: {
+    flex: 1, height: 48, borderRadius: RADIUS.full,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: COLORS.overlay.inputBg,
+    borderWidth: 1, borderColor: COLORS.border.default,
+  },
+  replyCancelText: { fontFamily: FONTS.dmMedium, fontSize: 15, color: COLORS.muted },
+  replySaveBtn: {
+    flex: 2, height: 48, borderRadius: RADIUS.full,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: COLORS.orange,
+    shadowColor: COLORS.orange, shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.4, shadowRadius: 8, elevation: 5,
+  },
+  replySaveText: { fontFamily: FONTS.dmMedium, fontSize: 15, color: '#fff' },
 
   editLink: { fontFamily: FONTS.dmMedium, fontSize: 13, color: COLORS.orange },
 

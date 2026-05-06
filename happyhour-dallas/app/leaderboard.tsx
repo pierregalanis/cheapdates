@@ -111,54 +111,72 @@ function LeaderRow({
 export default function LeaderboardScreen() {
   const { user, profile } = useAuthStore();
 
+  const [tab, setTab] = useState<'all' | 'friends'>('all');
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [myEntry, setMyEntry] = useState<LeaderboardEntry | null>(null);
   const [myRank, setMyRank] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [noFriends, setNoFriends] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
 
-    const { data } = await supabase
-      .from('profiles')
-      .select('id, full_name, points, level')
-      .order('points', { ascending: false })
-      .limit(50);
+    if (tab === 'friends' && user) {
+      const { data: followData } = await supabase
+        .from('follows')
+        .select('following_id')
+        .eq('follower_id', user.id);
+      const friendIds = (followData ?? []).map((f) => f.following_id);
+      if (!friendIds.length) {
+        setNoFriends(true);
+        setEntries([]);
+        setMyEntry(null);
+        setLoading(false);
+        return;
+      }
+      setNoFriends(false);
+      const allIds = [user.id, ...friendIds];
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, full_name, points, level')
+        .in('id', allIds)
+        .order('points', { ascending: false });
+      const ranked: LeaderboardEntry[] = (data ?? []).map((p, i) => ({ ...p, rank: i + 1 }));
+      setEntries(ranked);
+      setMyEntry(ranked.find((e) => e.id === user.id) ?? null);
+      setMyRank(null);
+    } else {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, full_name, points, level')
+        .order('points', { ascending: false })
+        .limit(50);
 
-    const ranked: LeaderboardEntry[] = (data ?? []).map((p, i) => ({
-      ...p,
-      rank: i + 1,
-    }));
+      const ranked: LeaderboardEntry[] = (data ?? []).map((p, i) => ({ ...p, rank: i + 1 }));
+      setEntries(ranked);
+      setNoFriends(false);
 
-    setEntries(ranked);
-
-    if (user) {
-      const inTop = ranked.find((e) => e.id === user.id);
-      if (inTop) {
-        setMyEntry(inTop);
-        setMyRank(inTop.rank);
-      } else {
-        // Fetch own rank via count of users with more points
-        const pts = profile?.points ?? 0;
-        const { count } = await supabase
-          .from('profiles')
-          .select('*', { count: 'exact', head: true })
-          .gt('points', pts);
-        const rank = (count ?? 0) + 1;
-        setMyRank(rank);
-        setMyEntry({
-          id: user.id,
-          full_name: profile?.full_name ?? null,
-          points: pts,
-          level: profile?.level ?? 'Newcomer',
-          rank,
-        });
+      if (user) {
+        const inTop = ranked.find((e) => e.id === user.id);
+        if (inTop) {
+          setMyEntry(inTop);
+          setMyRank(inTop.rank);
+        } else {
+          const pts = profile?.points ?? 0;
+          const { count } = await supabase
+            .from('profiles')
+            .select('*', { count: 'exact', head: true })
+            .gt('points', pts);
+          const rank = (count ?? 0) + 1;
+          setMyRank(rank);
+          setMyEntry({ id: user.id, full_name: profile?.full_name ?? null, points: pts, level: profile?.level ?? 'Newcomer', rank });
+        }
       }
     }
 
     setLoading(false);
-  }, [user?.id, profile?.points]);
+  }, [user?.id, profile?.points, tab]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -186,8 +204,28 @@ export default function LeaderboardScreen() {
         <View style={{ width: 40 }} />
       </View>
 
+      {/* Everyone / Friends tabs */}
+      <View style={styles.tabRow}>
+        {(['all', 'friends'] as const).map((t) => (
+          <TouchableOpacity
+            key={t}
+            style={[styles.tabPill, tab === t && styles.tabPillActive]}
+            onPress={() => setTab(t)}
+          >
+            <Ionicons
+              name={t === 'all' ? 'earth-outline' : 'people-outline'}
+              size={14}
+              color={tab === t ? COLORS.orange : COLORS.muted}
+            />
+            <Text style={[styles.tabPillText, tab === t && styles.tabPillTextActive]}>
+              {t === 'all' ? 'Everyone' : 'Friends'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
       {/* Podium strip */}
-      {!loading && entries.length >= 3 && (
+      {!loading && entries.length >= 3 && tab === 'all' && (
         <LinearGradient
           colors={['rgba(232,168,48,0.14)', 'transparent']}
           style={styles.podiumStrip}
@@ -217,6 +255,14 @@ export default function LeaderboardScreen() {
       {loading ? (
         <View style={styles.loadingWrap}>
           <ActivityIndicator size="large" color={COLORS.orange} />
+        </View>
+      ) : noFriends ? (
+        <View style={styles.loadingWrap}>
+          <Ionicons name="people-outline" size={48} color={COLORS.muted} />
+          <Text style={[styles.empty, { marginTop: SPACING.md }]}>Follow friends to compare scores</Text>
+          <TouchableOpacity style={styles.findFriendsBtn} onPress={() => router.push('/friends' as any)}>
+            <Text style={styles.findFriendsBtnText}>Find Friends</Text>
+          </TouchableOpacity>
         </View>
       ) : (
         <FlatList
@@ -296,6 +342,29 @@ const styles = StyleSheet.create({
     gap: 4, paddingVertical: SPACING.sm,
   },
   podiumRank: { fontFamily: FONTS.playfair, fontSize: 20 },
+
+  tabRow: {
+    flexDirection: 'row', gap: SPACING.sm,
+    paddingHorizontal: SPACING.lg, paddingVertical: SPACING.sm,
+    borderBottomWidth: 1, borderBottomColor: COLORS.border.subtle,
+  },
+  tabPill: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    paddingVertical: SPACING.sm, borderRadius: RADIUS.md,
+    backgroundColor: COLORS.overlay.inputBg,
+    borderWidth: 1, borderColor: COLORS.border.subtle,
+  },
+  tabPillActive: { backgroundColor: COLORS.overlay.orange10, borderColor: COLORS.border.default },
+  tabPillText: { fontFamily: FONTS.dmMedium, fontSize: 13, color: COLORS.muted },
+  tabPillTextActive: { color: COLORS.orange },
+
+  findFriendsBtn: {
+    marginTop: SPACING.md, paddingHorizontal: SPACING.xl, paddingVertical: SPACING.md,
+    backgroundColor: COLORS.orange, borderRadius: RADIUS.full,
+    shadowColor: COLORS.orange, shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.4, shadowRadius: 8, elevation: 5,
+  },
+  findFriendsBtnText: { fontFamily: FONTS.dmMedium, fontSize: 14, color: '#fff' },
 
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   listContent: { paddingVertical: SPACING.sm, paddingBottom: 32 },

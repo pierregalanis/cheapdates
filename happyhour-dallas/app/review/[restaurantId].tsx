@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   TextInput,
   ScrollView,
+  Image,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
@@ -15,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 import { Analytics } from '@/lib/analytics';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/store/authStore';
@@ -35,7 +37,28 @@ const HIGHLIGHT_TAGS = [
 ];
 
 const STAR_LABELS = ['', 'Poor', 'Fair', 'Good', 'Great', 'Amazing!'];
-const POINTS_PER_REVIEW = 5;
+const POINTS_PER_REVIEW = 25;
+const MAX_PHOTOS = 3;
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+async function uploadReviewPhoto(uri: string, userId: string): Promise<string | null> {
+  try {
+    const ext = uri.split('?')[0].split('.').pop()?.toLowerCase() ?? 'jpg';
+    const path = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+    const contentType = ext === 'png' ? 'image/png' : 'image/jpeg';
+    const response = await fetch(uri);
+    const arrayBuffer = await response.arrayBuffer();
+    const { data, error } = await supabase.storage
+      .from('review-photos')
+      .upload(path, arrayBuffer, { contentType, upsert: false });
+    if (error || !data) return null;
+    const { data: { publicUrl } } = supabase.storage.from('review-photos').getPublicUrl(data.path);
+    return publicUrl;
+  } catch {
+    return null;
+  }
+}
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -50,10 +73,13 @@ export default function ReviewScreen() {
   const [rating, setRating] = useState(0);
   const [hovered, setHovered] = useState(0);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [title, setTitle] = useState('');
   const [text, setText] = useState('');
+  const [photos, setPhotos] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [focused, setFocused] = useState(false);
+  const [titleFocused, setTitleFocused] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
   const displayRating = hovered || rating;
@@ -81,6 +107,25 @@ export default function ReviewScreen() {
     );
   };
 
+  const pickPhoto = async () => {
+    if (photos.length >= MAX_PHOTOS) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.75,
+      allowsEditing: true,
+      aspect: [4, 3],
+    });
+    if (!result.canceled && result.assets[0]) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setPhotos((prev) => [...prev, result.assets[0].uri]);
+    }
+  };
+
+  const removePhoto = (index: number) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setPhotos((prev) => prev.filter((_, i) => i !== index));
+  };
+
   const handleSubmit = async () => {
     if (!canSubmit) return;
     if (!user) {
@@ -92,11 +137,20 @@ export default function ReviewScreen() {
     setSubmitError('');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
+    // Upload photos first (failures are silently skipped — review still posts)
+    const photoUrls: string[] = [];
+    for (const uri of photos) {
+      const url = await uploadReviewPhoto(uri, user.id);
+      if (url) photoUrls.push(url);
+    }
+
     const { error } = await supabase.from('reviews').insert({
       restaurant_id: restaurantId,
       user_id: user.id,
       rating,
+      title: title.trim() || null,
       body: text,
+      photo_urls: photoUrls,
     });
 
     if (error) {
@@ -105,7 +159,6 @@ export default function ReviewScreen() {
       return;
     }
 
-    // Award points for review (fire and forget)
     supabase.rpc('increment_user_points', { p_user_id: user.id, p_points: POINTS_PER_REVIEW });
 
     setLoading(false);
@@ -222,8 +275,25 @@ export default function ReviewScreen() {
             })}
           </View>
 
+          {/* Title (optional) */}
+          <Text style={styles.fieldLabel}>Title <Text style={styles.optional}>(optional)</Text></Text>
+          <View style={[styles.titleInput, titleFocused && styles.textAreaFocused]}>
+            <TextInput
+              style={styles.titleTextInput}
+              placeholder="Give your review a headline…"
+              placeholderTextColor={COLORS.faded}
+              value={title}
+              onChangeText={(t) => setTitle(t.slice(0, 100))}
+              onFocus={() => setTitleFocused(true)}
+              onBlur={() => setTitleFocused(false)}
+              returnKeyType="next"
+              keyboardAppearance="dark"
+              maxLength={100}
+            />
+          </View>
+
           {/* Review text */}
-          <Text style={styles.fieldLabel}>Tell your story</Text>
+          <Text style={[styles.fieldLabel, { marginTop: SPACING.md }]}>Tell your story</Text>
           <View style={[styles.textArea, focused && styles.textAreaFocused]}>
             <TextInput
               style={styles.textInput}
@@ -243,6 +313,27 @@ export default function ReviewScreen() {
             {text.length < 10 ? `${10 - text.length} more characters needed` : `${text.length} characters`}
           </Text>
 
+          {/* Photos */}
+          <Text style={[styles.fieldLabel, { marginTop: SPACING.sm }]}>
+            Photos <Text style={styles.optional}>(up to {MAX_PHOTOS})</Text>
+          </Text>
+          <View style={styles.photosRow}>
+            {photos.map((uri, i) => (
+              <View key={i} style={styles.photoThumb}>
+                <Image source={{ uri }} style={styles.photoImg} />
+                <TouchableOpacity style={styles.photoRemove} onPress={() => removePhoto(i)}>
+                  <Ionicons name="close-circle" size={18} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            ))}
+            {photos.length < MAX_PHOTOS && (
+              <TouchableOpacity style={styles.photoAdd} onPress={pickPhoto}>
+                <Ionicons name="camera-outline" size={22} color={COLORS.muted} />
+                <Text style={styles.photoAddText}>Add</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
           {submitError ? (
             <Text style={styles.errorText}>{submitError}</Text>
           ) : null}
@@ -261,7 +352,7 @@ export default function ReviewScreen() {
             ) : (
               <>
                 <Ionicons name="star" size={18} color="#fff" />
-                <Text style={styles.submitBtnText}>Post Review</Text>
+                <Text style={styles.submitBtnText}>Post Review · +{POINTS_PER_REVIEW} pts</Text>
               </>
             )}
           </TouchableOpacity>
@@ -318,6 +409,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginBottom: SPACING.md, marginTop: SPACING.xs,
   },
+  optional: { textTransform: 'none', letterSpacing: 0, color: COLORS.faded, fontSize: 11 },
 
   starSection: { alignItems: 'center', marginBottom: SPACING.xl },
   starPickerRow: { flexDirection: 'row', gap: SPACING.sm, marginBottom: SPACING.sm },
@@ -339,6 +431,17 @@ const styles = StyleSheet.create({
   tagLabel: { fontFamily: FONTS.dmMedium, fontSize: 13, color: COLORS.muted },
   tagLabelActive: { color: '#fff' },
 
+  titleInput: {
+    backgroundColor: COLORS.overlay.inputBg,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1.5, borderColor: COLORS.border.default,
+    paddingHorizontal: SPACING.md,
+    height: 46,
+    justifyContent: 'center',
+    marginBottom: SPACING.xs,
+  },
+  titleTextInput: { fontFamily: FONTS.dmRegular, fontSize: 15, color: COLORS.cream },
+
   textArea: {
     backgroundColor: COLORS.overlay.inputBg,
     borderRadius: RADIUS.lg,
@@ -350,6 +453,23 @@ const styles = StyleSheet.create({
   textAreaFocused: { borderColor: COLORS.orange, backgroundColor: 'rgba(255,107,26,0.06)' },
   textInput: { fontFamily: FONTS.dmRegular, fontSize: 15, color: COLORS.cream, lineHeight: 22 },
   charCount: { fontFamily: FONTS.dmRegular, fontSize: 12, color: COLORS.muted, textAlign: 'right', marginBottom: SPACING.lg },
+
+  photosRow: { flexDirection: 'row', gap: SPACING.sm, marginBottom: SPACING.lg },
+  photoThumb: { width: 80, height: 80, borderRadius: RADIUS.md, overflow: 'visible' },
+  photoImg: { width: 80, height: 80, borderRadius: RADIUS.md, backgroundColor: COLORS.surface },
+  photoRemove: {
+    position: 'absolute', top: -6, right: -6,
+    backgroundColor: COLORS.dark, borderRadius: 9,
+  },
+  photoAdd: {
+    width: 80, height: 80, borderRadius: RADIUS.md,
+    backgroundColor: COLORS.overlay.inputBg,
+    borderWidth: 1.5, borderColor: COLORS.border.default,
+    borderStyle: 'dashed',
+    alignItems: 'center', justifyContent: 'center', gap: 4,
+  },
+  photoAddText: { fontFamily: FONTS.dmMedium, fontSize: 11, color: COLORS.muted },
+
   errorText: { fontFamily: FONTS.dmRegular, fontSize: 13, color: COLORS.status.error, textAlign: 'center', marginBottom: SPACING.md },
 
   ctaWrap: {

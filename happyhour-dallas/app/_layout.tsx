@@ -117,6 +117,8 @@ export default function RootLayout() {
         <Stack.Screen name="reset-password" />
         <Stack.Screen name="city-picker" />
         <Stack.Screen name="chat" />
+        <Stack.Screen name="friends" />
+        <Stack.Screen name="activity" />
         <Stack.Screen name="owner/dashboard" />
         <Stack.Screen name="owner/happy-hours" />
         <Stack.Screen name="owner/menu" />

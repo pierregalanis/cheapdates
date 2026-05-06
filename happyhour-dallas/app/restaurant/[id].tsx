@@ -4,6 +4,7 @@ import {
   Text,
   TouchableOpacity,
   ScrollView,
+  Image,
   StyleSheet,
   Animated,
   Share,
@@ -16,6 +17,7 @@ import { StatusBar } from 'expo-status-bar';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Analytics } from '@/lib/analytics';
+import { supabase } from '@/lib/supabase';
 import { COLORS, FONTS, RADIUS, SPACING } from '@/constants/theme';
 import CrowdMeter, { CROWD_CONFIG } from '@/components/ui/CrowdMeter';
 import StarRating from '@/components/ui/StarRating';
@@ -121,6 +123,8 @@ export default function RestaurantDetailScreen() {
   const [checkedIn, setCheckedIn] = useState(false);
   const [checkingIn, setCheckingIn] = useState(false);
   const [checkInMsg, setCheckInMsg] = useState('');
+  const [userHelpfulVotes, setUserHelpfulVotes] = useState<Set<string>>(new Set());
+  const [helpfulCounts, setHelpfulCounts] = useState<Record<string, number>>({});
 
   const detail: Restaurant | null = selectedRestaurant?.id === id ? selectedRestaurant : null;
   const favorited = favorites.includes(id ?? '');
@@ -133,6 +137,29 @@ export default function RestaurantDetailScreen() {
     if (detail) Analytics.restaurantView(detail.id, detail.name);
   }, [detail?.id]);
 
+  // Seed local helpful counts from loaded reviews
+  useEffect(() => {
+    if (!detail) return;
+    const counts: Record<string, number> = {};
+    (detail.reviews ?? []).forEach((r) => { counts[r.id] = r.helpful_count; });
+    setHelpfulCounts(counts);
+  }, [detail?.id]);
+
+  // Fetch which reviews the signed-in user has already voted helpful
+  useEffect(() => {
+    if (!user || !detail) return;
+    const ids = (detail.reviews ?? []).map((r) => r.id);
+    if (!ids.length) return;
+    supabase
+      .from('review_helpful_votes')
+      .select('review_id')
+      .eq('user_id', user.id)
+      .in('review_id', ids)
+      .then(({ data }) => {
+        setUserHelpfulVotes(new Set((data ?? []).map((v) => v.review_id)));
+      });
+  }, [user?.id, detail?.id]);
+
   const headerOpacity = scrollY.interpolate({ inputRange: [HERO_H - 80, HERO_H - 20], outputRange: [0, 1], extrapolate: 'clamp' });
   const heroScale    = scrollY.interpolate({ inputRange: [-60, 0], outputRange: [1.12, 1], extrapolate: 'clamp' });
 
@@ -142,9 +169,26 @@ export default function RestaurantDetailScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   };
 
+  const toggleHelpful = async (reviewId: string) => {
+    if (!user) { router.push('/(auth)/login' as any); return; }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const voted = userHelpfulVotes.has(reviewId);
+    if (voted) {
+      setUserHelpfulVotes((prev) => { const s = new Set(prev); s.delete(reviewId); return s; });
+      setHelpfulCounts((prev) => ({ ...prev, [reviewId]: Math.max(0, (prev[reviewId] ?? 1) - 1) }));
+      await supabase.from('review_helpful_votes').delete().match({ user_id: user.id, review_id: reviewId });
+      supabase.rpc('decrement_helpful_count', { p_review_id: reviewId });
+    } else {
+      setUserHelpfulVotes((prev) => new Set([...prev, reviewId]));
+      setHelpfulCounts((prev) => ({ ...prev, [reviewId]: (prev[reviewId] ?? 0) + 1 }));
+      await supabase.from('review_helpful_votes').insert({ user_id: user.id, review_id: reviewId });
+      supabase.rpc('increment_helpful_count', { p_review_id: reviewId });
+    }
+  };
+
   const handleShare = async () => {
     if (!detail) return;
-    await Share.share({ message: `Check out ${detail.name} happy hour on HappyHour Dallas!` });
+    await Share.share({ message: `Check out ${detail.name} happy hour on Cheap Dates!` });
   };
 
   const handleReserve = () => {
@@ -472,29 +516,70 @@ export default function RestaurantDetailScreen() {
               <Text style={styles.noReviewsText}>No reviews yet — be the first!</Text>
             </View>
           ) : (
-            reviews.slice(0, 5).map((rev) => (
-              <View key={rev.id} style={styles.reviewCard}>
-                <View style={styles.reviewHeader}>
-                  <View style={styles.reviewAvatar}>
-                    <Text style={styles.reviewAvatarEmoji}>
-                      {rev.profiles?.avatar_url ? '👤' : '🧑'}
+            reviews.slice(0, 5).map((rev) => {
+              const voted = userHelpfulVotes.has(rev.id);
+              const count = helpfulCounts[rev.id] ?? 0;
+              return (
+                <View key={rev.id} style={styles.reviewCard}>
+                  <View style={styles.reviewHeader}>
+                    <View style={styles.reviewAvatar}>
+                      <Text style={styles.reviewAvatarEmoji}>
+                        {rev.profiles?.avatar_url ? '👤' : '🧑'}
+                      </Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.reviewAuthor}>
+                        {rev.profiles?.full_name ?? 'Anonymous'}
+                      </Text>
+                      <StarRating rating={rev.rating} showStars size={13} />
+                    </View>
+                    <Text style={styles.reviewTime}>
+                      {new Date(rev.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                     </Text>
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.reviewAuthor}>
-                      {rev.profiles?.full_name ?? 'Anonymous'}
+
+                  {rev.title ? (
+                    <Text style={styles.reviewTitle}>{rev.title}</Text>
+                  ) : null}
+                  {rev.body ? (
+                    <Text style={styles.reviewText}>{rev.body}</Text>
+                  ) : null}
+
+                  {(rev.photo_urls ?? []).length > 0 && (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.reviewPhotosRow}>
+                      {(rev.photo_urls ?? []).map((url, i) => (
+                        <Image key={i} source={{ uri: url }} style={styles.reviewPhoto} />
+                      ))}
+                    </ScrollView>
+                  )}
+
+                  <TouchableOpacity
+                    style={[styles.helpfulBtn, voted && styles.helpfulBtnActive]}
+                    onPress={() => toggleHelpful(rev.id)}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons
+                      name={voted ? 'thumbs-up' : 'thumbs-up-outline'}
+                      size={13}
+                      color={voted ? COLORS.orange : COLORS.muted}
+                    />
+                    <Text style={[styles.helpfulText, voted && { color: COLORS.orange }]}>
+                      Helpful{count > 0 ? ` (${count})` : ''}
                     </Text>
-                    <StarRating rating={rev.rating} showStars size={13} />
-                  </View>
-                  <Text style={styles.reviewTime}>
-                    {new Date(rev.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                  </Text>
+                  </TouchableOpacity>
+
+                  {rev.restaurant_reply ? (
+                    <View style={styles.ownerReply}>
+                      <View style={styles.ownerReplyHeader}>
+                        <Ionicons name="business-outline" size={13} color={COLORS.orange} />
+                        <Text style={styles.ownerReplyLabel}>Owner response</Text>
+                      </View>
+                      <Text style={styles.ownerReplyText}>{rev.restaurant_reply}</Text>
+                    </View>
+                  ) : null}
                 </View>
-                {rev.body ? (
-                  <Text style={styles.reviewText}>{rev.body}</Text>
-                ) : null}
-              </View>
-            ))
+              );
+            })
           )}
         </View>
       </Animated.ScrollView>
@@ -783,7 +868,37 @@ const styles = StyleSheet.create({
   reviewAvatarEmoji: { fontSize: 18 },
   reviewAuthor: { fontFamily: FONTS.dmMedium, fontSize: 14, color: COLORS.cream, marginBottom: 2 },
   reviewTime: { fontFamily: FONTS.dmRegular, fontSize: 11, color: COLORS.muted },
+  reviewTitle: { fontFamily: FONTS.dmMedium, fontSize: 14, color: COLORS.cream, marginBottom: 4 },
   reviewText: { fontFamily: FONTS.dmRegular, fontSize: 14, color: COLORS.muted, lineHeight: 21 },
+  reviewPhotosRow: { marginTop: SPACING.sm },
+  reviewPhoto: {
+    width: 80, height: 80, borderRadius: RADIUS.md,
+    marginRight: SPACING.sm, backgroundColor: COLORS.surface,
+  },
+  helpfulBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    alignSelf: 'flex-start',
+    marginTop: SPACING.sm,
+    paddingHorizontal: 10, paddingVertical: 5,
+    borderRadius: RADIUS.full,
+    backgroundColor: COLORS.overlay.inputBg,
+    borderWidth: 1, borderColor: COLORS.border.subtle,
+  },
+  helpfulBtnActive: {
+    backgroundColor: COLORS.overlay.orange10,
+    borderColor: COLORS.border.default,
+  },
+  helpfulText: { fontFamily: FONTS.dmMedium, fontSize: 12, color: COLORS.muted },
+  ownerReply: {
+    marginTop: SPACING.sm,
+    backgroundColor: COLORS.overlay.orange10,
+    borderRadius: RADIUS.md,
+    borderWidth: 1, borderColor: COLORS.border.default,
+    padding: SPACING.md, gap: SPACING.xs,
+  },
+  ownerReplyHeader: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  ownerReplyLabel: { fontFamily: FONTS.dmMedium, fontSize: 12, color: COLORS.orange },
+  ownerReplyText: { fontFamily: FONTS.dmRegular, fontSize: 13, color: COLORS.cream, lineHeight: 19 },
 
   reserveBar: {
     position: 'absolute', bottom: 0, left: 0, right: 0,

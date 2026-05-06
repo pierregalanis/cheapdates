@@ -12,9 +12,12 @@
       }
     },
     "preview": {
-      "distribution": "store",
+      "distribution": "internal",
       "ios": {
         "buildConfiguration": "Release"
+      },
+      "android": {
+        "buildType": "apk"
       },
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://pleopszyiydthtyeszft.supabase.co",
@@ -26,6 +29,9 @@
       "autoIncrement": true,
       "ios": {
         "buildConfiguration": "Release"
+      },
+      "android": {
+        "buildType": "app-bundle"
       },
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://pleopszyiydthtyeszft.supabase.co",
@@ -39,6 +45,10 @@
         "appleId": "diesstro12@yahoo.com",
         "ascAppId": "6766267784",
         "appleTeamId": "JC56CA8A5Y"
+      },
+      "android": {
+        "serviceAccountKeyPath": "./google-play-service-account.json",
+        "track": "internal"
       }
     }
   }

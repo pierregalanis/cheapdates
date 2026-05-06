@@ -48,6 +48,7 @@ export interface Review {
   visit_date: string | null;
   helpful_count: number;
   restaurant_reply: string | null;
+  photo_urls: string[];
   created_at: string;
   profiles?: { full_name: string | null; avatar_url: string | null };
 }
