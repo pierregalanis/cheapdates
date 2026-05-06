@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="38%" r="75%">
+      <stop offset="0%" stop-color="#2E1000"/>
+      <stop offset="100%" stop-color="#0F0500"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="44%" r="42%">
+      <stop offset="0%" stop-color="#FF6B1A" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#FF6B1A" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+
+  <!-- Soft glow behind glass -->
+  <ellipse cx="512" cy="460" rx="370" ry="290" fill="url(#glow)"/>
+
+  <!-- Glass bowl fill (very subtle) -->
+  <path d="M 270 205 L 512 572 L 754 205 Z" fill="#FF6B1A" fill-opacity="0.07"/>
+
+  <!-- Glass rim -->
+  <line x1="270" y1="205" x2="754" y2="205" stroke="#FF6B1A" stroke-width="32" stroke-linecap="round"/>
+
+  <!-- Glass bowl sides -->
+  <path d="M 270 205 L 512 572 L 754 205"
+        fill="none" stroke="#FF6B1A" stroke-width="32"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Stem -->
+  <line x1="512" y1="572" x2="512" y2="736"
+        stroke="#FF6B1A" stroke-width="24" stroke-linecap="round"/>
+
+  <!-- Base -->
+  <line x1="388" y1="736" x2="636" y2="736"
+        stroke="#FF6B1A" stroke-width="32" stroke-linecap="round"/>
+
+  <!-- Heart inside bowl -->
+  <path d="
+    M 512 444
+    C 492 426 414 398 414 352
+    C 414 310 450 296 476 303
+    C 493 309 507 321 512 336
+    C 517 321 531 309 548 303
+    C 574 296 610 310 610 352
+    C 610 398 532 426 512 444 Z
+  " fill="#FFF8F0"/>
+
+  <!-- Bubbles below heart, inside glass -->
+  <circle cx="468" cy="488" r="7" fill="#FF6B1A" fill-opacity="0.38"/>
+  <circle cx="536" cy="504" r="5" fill="#FF6B1A" fill-opacity="0.28"/>
+  <circle cx="494" cy="522" r="6" fill="#FF6B1A" fill-opacity="0.33"/>
+</svg>

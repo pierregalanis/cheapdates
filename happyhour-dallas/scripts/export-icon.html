@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+<head><title>Cheap Dates — Asset Exporter</title></head>
+<body style="background:#111;color:#fff;font-family:sans-serif;padding:32px;max-width:900px">
+  <h2 style="color:#FF6B1A;margin-bottom:4px">Cheap Dates — Asset Exporter</h2>
+  <p style="color:#888;margin-bottom:32px">Click each button to download the asset, then copy to <code>assets/images/</code></p>
+
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:24px">
+
+    <!-- icon.png -->
+    <div>
+      <p style="margin:0 0 8px;font-size:13px;color:#aaa">icon.png <span style="color:#555">1024×1024</span></p>
+      <canvas id="c-icon" width="1024" height="1024" style="width:100%;border:1px solid #333;border-radius:20%;display:block;margin-bottom:10px"></canvas>
+      <button onclick="download('c-icon','icon.png')" style="width:100%;padding:8px;background:#FF6B1A;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px">Download</button>
+    </div>
+
+    <!-- adaptive-icon.png -->
+    <div>
+      <p style="margin:0 0 8px;font-size:13px;color:#aaa">adaptive-icon.png <span style="color:#555">1024×1024</span></p>
+      <canvas id="c-adaptive" width="1024" height="1024" style="width:100%;border:1px solid #333;border-radius:20%;display:block;margin-bottom:10px"></canvas>
+      <button onclick="download('c-adaptive','adaptive-icon.png')" style="width:100%;padding:8px;background:#FF6B1A;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px">Download</button>
+    </div>
+
+    <!-- splash-icon.png -->
+    <div>
+      <p style="margin:0 0 8px;font-size:13px;color:#aaa">splash-icon.png <span style="color:#555">1024×1024</span></p>
+      <canvas id="c-splash" width="1024" height="1024" style="width:100%;border:1px solid #333;display:block;margin-bottom:10px"></canvas>
+      <button onclick="download('c-splash','splash-icon.png')" style="width:100%;padding:8px;background:#FF6B1A;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px">Download</button>
+    </div>
+
+    <!-- favicon.png -->
+    <div>
+      <p style="margin:0 0 8px;font-size:13px;color:#aaa">favicon.png <span style="color:#555">196×196</span></p>
+      <canvas id="c-favicon" width="196" height="196" style="width:100%;border:1px solid #333;border-radius:12%;display:block;margin-bottom:10px"></canvas>
+      <button onclick="download('c-favicon','favicon.png')" style="width:100%;padding:8px;background:#FF6B1A;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px">Download</button>
+    </div>
+
+  </div>
+
+  <script>
+    // ── SVG definitions ────────────────────────────────────────────────
+    const glassSvg = (scale = 1, offsetX = 0, offsetY = 0) => `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="38%" r="75%">
+      <stop offset="0%" stop-color="#2E1000"/>
+      <stop offset="100%" stop-color="#0F0500"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="44%" r="42%">
+      <stop offset="0%" stop-color="#FF6B1A" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#FF6B1A" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <ellipse cx="512" cy="460" rx="370" ry="290" fill="url(#glow)"/>
+  <g transform="translate(${offsetX}, ${offsetY}) scale(${scale})">
+    <path d="M 270 205 L 512 572 L 754 205 Z" fill="#FF6B1A" fill-opacity="0.07"/>
+    <line x1="270" y1="205" x2="754" y2="205" stroke="#FF6B1A" stroke-width="32" stroke-linecap="round"/>
+    <path d="M 270 205 L 512 572 L 754 205" fill="none" stroke="#FF6B1A" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="512" y1="572" x2="512" y2="736" stroke="#FF6B1A" stroke-width="24" stroke-linecap="round"/>
+    <line x1="388" y1="736" x2="636" y2="736" stroke="#FF6B1A" stroke-width="32" stroke-linecap="round"/>
+    <path d="M 512 444 C 492 426 414 398 414 352 C 414 310 450 296 476 303 C 493 309 507 321 512 336 C 517 321 531 309 548 303 C 574 296 610 310 610 352 C 610 398 532 426 512 444 Z" fill="#FFF8F0"/>
+    <circle cx="468" cy="488" r="7" fill="#FF6B1A" fill-opacity="0.38"/>
+    <circle cx="536" cy="504" r="5" fill="#FF6B1A" fill-opacity="0.28"/>
+    <circle cx="494" cy="522" r="6" fill="#FF6B1A" fill-opacity="0.33"/>
+  </g>
+</svg>`;
+
+    // Splash: glass shrunk to 65% and centered
+    const splashSvg = `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <radialGradient id="bg2" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#1A0A00"/>
+      <stop offset="100%" stop-color="#0F0500"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="50%" cy="50%" r="35%">
+      <stop offset="0%" stop-color="#FF6B1A" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#FF6B1A" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg2)"/>
+  <ellipse cx="512" cy="500" rx="300" ry="240" fill="url(#glow2)"/>
+  <g transform="translate(179, 144) scale(0.65)">
+    <path d="M 270 205 L 512 572 L 754 205 Z" fill="#FF6B1A" fill-opacity="0.07"/>
+    <line x1="270" y1="205" x2="754" y2="205" stroke="#FF6B1A" stroke-width="32" stroke-linecap="round"/>
+    <path d="M 270 205 L 512 572 L 754 205" fill="none" stroke="#FF6B1A" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="512" y1="572" x2="512" y2="736" stroke="#FF6B1A" stroke-width="24" stroke-linecap="round"/>
+    <line x1="388" y1="736" x2="636" y2="736" stroke="#FF6B1A" stroke-width="32" stroke-linecap="round"/>
+    <path d="M 512 444 C 492 426 414 398 414 352 C 414 310 450 296 476 303 C 493 309 507 321 512 336 C 517 321 531 309 548 303 C 574 296 610 310 610 352 C 610 398 532 426 512 444 Z" fill="#FFF8F0"/>
+    <circle cx="468" cy="488" r="7" fill="#FF6B1A" fill-opacity="0.38"/>
+    <circle cx="536" cy="504" r="5" fill="#FF6B1A" fill-opacity="0.28"/>
+    <circle cx="494" cy="522" r="6" fill="#FF6B1A" fill-opacity="0.33"/>
+  </g>
+  <text x="512" y="860" text-anchor="middle" font-family="Georgia, serif" font-size="52" font-weight="bold" fill="#FF6B1A" letter-spacing="3">Cheap Dates</text>
+  <text x="512" y="910" text-anchor="middle" font-family="Georgia, serif" font-size="26" fill="#8A6A50" letter-spacing="2">Happy Hour · Dallas</text>
+</svg>`;
+
+    // ── Render helpers ────────────────────────────────────────────────
+    function renderSvg(svgStr, canvasId, w, h) {
+      const canvas = document.getElementById(canvasId);
+      const ctx = canvas.getContext('2d');
+      const blob = new Blob([svgStr], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, w, h);
+        URL.revokeObjectURL(url);
+      };
+      img.src = url;
+    }
+
+    function download(canvasId, filename) {
+      const link = document.createElement('a');
+      link.download = filename;
+      link.href = document.getElementById(canvasId).toDataURL('image/png');
+      link.click();
+    }
+
+    // ── Render all on load ────────────────────────────────────────────
+    renderSvg(glassSvg(),   'c-icon',     1024, 1024);
+    renderSvg(glassSvg(),   'c-adaptive', 1024, 1024);
+    renderSvg(splashSvg,    'c-splash',   1024, 1024);
+    renderSvg(glassSvg(),   'c-favicon',   196,  196);
+  </script>
+</body>
+</html>
